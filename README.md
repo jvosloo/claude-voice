@@ -1,6 +1,8 @@
 # Claude Voice Interface
 
-Two-way voice conversation with Claude Code — speak via push-to-talk, hear responses via neural TTS.
+Push-to-talk voice input for macOS. Transcribes speech and types it into any focused application.
+
+When used with Claude Code, responses are spoken aloud via neural TTS — enabling two-way voice conversation.
 
 **Platform:** macOS (uses `afplay` for audio playback)
 
@@ -9,7 +11,7 @@ Two-way voice conversation with Claude Code — speak via push-to-talk, hear res
 ## Installation
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/claude-voice.git
+git clone https://github.com/jvosloo/claude-voice.git
 cd claude-voice
 ./install.sh
 ```
@@ -39,12 +41,18 @@ System Settings > Privacy & Security > Accessibility
 | `cv voice-off` | Disable voice output |
 | `cv voice-on` | Enable voice output |
 
-### Speaking to Claude
+### Voice Input (Works Anywhere)
 
-1. Hold **Right Alt** and speak your question
-2. Release to transcribe (review before pressing Enter)
-3. Claude's response will be spoken aloud
-4. **Press the hotkey again to interrupt** Claude while speaking
+1. Hold **Right Alt** and speak
+2. Release to transcribe — text is typed into the focused input
+3. Works with any application: browsers, text editors, terminals, etc.
+
+### With Claude Code (Two-Way Voice)
+
+When the focused application is Claude Code:
+- Your transcribed speech is sent to Claude
+- Claude's response is spoken aloud via TTS
+- **Press the hotkey to interrupt** Claude while speaking
 
 ### Voice Commands
 
