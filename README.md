@@ -113,7 +113,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `backend` | `mlx` | `mlx` (fast on Apple Silicon) or `faster-whisper` (CPU) |
-| `model` | `small.en` | Whisper model (see table below) |
+| `model` | `large-v3` | Whisper model (see table below) |
 | `language` | `en` | Language code |
 | `device` | `cpu` | Compute device for faster-whisper: `cpu` or `cuda` |
 
