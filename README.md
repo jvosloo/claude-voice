@@ -1,0 +1,172 @@
+# Claude Voice Interface
+
+Two-way voice conversation with Claude Code — speak via push-to-talk, hear responses via neural TTS.
+
+**Platform:** macOS (uses `afplay` for audio playback)
+
+---
+
+## Installation
+
+```bash
+git clone https://github.com/YOUR_USERNAME/claude-voice.git
+cd claude-voice
+./install.sh
+```
+
+The installer will:
+- Create `~/.claude-voice/` with daemon files
+- Set up a Python virtual environment with dependencies
+- Download the default voice model
+- Install the Claude Code TTS hook
+- Optionally install MLX Whisper (recommended for Apple Silicon)
+
+**Required:** Grant accessibility permissions to your terminal in
+System Settings > Privacy & Security > Accessibility
+
+---
+
+## Usage
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `cvf` | Start daemon (foreground, Ctrl+C to stop) |
+| `cvs` | Start daemon in silent mode (no voice output) |
+| `cv stop` | Stop the daemon |
+| `cv status` | Check if daemon is running |
+| `cv voice-off` | Disable voice output |
+| `cv voice-on` | Enable voice output |
+
+### Speaking to Claude
+
+1. Hold **Right Alt** and speak your question
+2. Release to transcribe (review before pressing Enter)
+3. Claude's response will be spoken aloud
+4. **Press the hotkey again to interrupt** Claude while speaking
+
+### Voice Commands
+
+Say these phrases to toggle voice output without leaving Claude:
+
+| Say this | Effect |
+|----------|--------|
+| **"Stop speaking"** | Disable voice output |
+| **"Start speaking"** | Enable voice output |
+
+Also accepts "stop talking" / "start talking".
+
+---
+
+## Setup
+
+### Shell Aliases (Recommended)
+
+Add to your `~/.bashrc` or `~/.zshrc`:
+```bash
+alias cv="~/.claude-voice/claude-voice-daemon"
+alias cvf="~/.claude-voice/claude-voice-daemon foreground"
+alias cvs="~/.claude-voice/claude-voice-daemon --silent foreground"
+```
+
+Then run `source ~/.bashrc` to load them.
+
+### Quick Start
+
+**Terminal 1:** Start the voice daemon
+```bash
+cvf
+```
+
+**Terminal 2:** Start Claude Code
+```bash
+claude
+```
+
+---
+
+## Configuration
+
+Edit `~/.claude-voice/config.yaml` to customize behavior.
+
+### Speech Settings (TTS Output)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `voice` | `en_GB-alan-medium` | Piper voice model |
+| `speed` | `1.3` | Playback speed (1.0 = normal) |
+| `enabled` | `true` | Enable/disable TTS output |
+| `max_chars` | `null` | Limit spoken output length (`null` = unlimited) |
+| `skip_code_blocks` | `true` | Don't speak code blocks |
+
+### Transcription Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `backend` | `mlx` | `mlx` (fast on Apple Silicon) or `faster-whisper` (CPU) |
+| `model` | `small.en` | Whisper model (see table below) |
+| `language` | `en` | Language code |
+| `device` | `cpu` | Compute device for faster-whisper: `cpu` or `cuda` |
+
+**Available models:**
+
+| Model | Size | Speed | Accuracy | Notes |
+|-------|------|-------|----------|-------|
+| `tiny.en` | ~40MB | Fastest | Basic | Good for quick tests |
+| `base.en` | ~150MB | Fast | Good | Balanced |
+| `small.en` | ~500MB | Medium | Better | Recommended |
+| `medium.en` | ~1.5GB | Slower | Great | High accuracy |
+| `large-v3` | ~3GB | Slowest | Best | MLX recommended for this |
+
+**Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast.
+
+### Input Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `hotkey` | `right_alt` | Key to hold for recording |
+| `auto_submit` | `false` | Press Enter automatically after transcription |
+| `min_audio_length` | `0.5` | Ignore recordings shorter than this (seconds) |
+| `typing_delay` | `0.01` | Delay between keystrokes (seconds) |
+
+**Available hotkeys:** `right_alt`, `left_alt`, `right_cmd`, `left_cmd`, `right_ctrl`, `left_ctrl`, `right_shift`, `caps_lock`, `f18`, `f19`
+
+### Audio Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `input_device` | `null` | Microphone device (`null` = system default) |
+| `sample_rate` | `16000` | Sample rate in Hz (Whisper expects 16kHz) |
+
+---
+
+## Available Voices
+
+Downloaded voices are stored in `~/.claude-voice/models/piper/`.
+
+| Voice | Style |
+|-------|-------|
+| `en_GB-alan-medium` | British male |
+| `en_US-ryan-high` | American male (high quality) |
+| `en_US-ryan-medium` | American male |
+| `en_US-amy-medium` | American female |
+
+Browse more at: https://huggingface.co/rhasspy/piper-voices/tree/main/en
+
+---
+
+## Components
+
+### Voice Input (Daemon)
+- `~/.claude-voice/daemon/` - Python modules
+- `~/.claude-voice/claude-voice-daemon` - Launch script
+- `~/.claude-voice/config.yaml` - Configuration file
+
+### Voice Output (Hook)
+- `~/.claude/hooks/speak-response.py` - TTS hook using Piper
+- `~/.claude/settings.json` - Claude Code Stop hook config
+
+### Models
+- `~/.claude-voice/models/whisper/` - Whisper speech recognition models
+- `~/.claude-voice/models/piper/` - Piper TTS voice models

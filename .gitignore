@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Models (downloaded at runtime)
+models/
+
+# Runtime files
+*.pid
+*.log
+logs/
+.silent
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local config (use config.yaml.example as template)
+config.yaml

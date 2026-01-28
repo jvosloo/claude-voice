@@ -1,0 +1,137 @@
+#!/bin/bash
+
+DAEMON_DIR="$HOME/.claude-voice"
+VENV_DIR="$DAEMON_DIR/venv"
+PID_FILE="$DAEMON_DIR/daemon.pid"
+LOG_FILE="$DAEMON_DIR/logs/daemon.log"
+SILENT_FLAG="$DAEMON_DIR/.silent"
+
+# Check for --silent flag
+SILENT=false
+for arg in "$@"; do
+    if [ "$arg" = "--silent" ] || [ "$arg" = "-s" ]; then
+        SILENT=true
+    fi
+done
+
+start() {
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        echo "Daemon is already running (PID: $(cat $PID_FILE))"
+        return 1
+    fi
+
+    # Set silent mode flag
+    if [ "$SILENT" = true ]; then
+        touch "$SILENT_FLAG"
+        echo "Starting Claude Voice daemon (silent mode - TTS disabled)..."
+    else
+        rm -f "$SILENT_FLAG"
+        echo "Starting Claude Voice daemon..."
+    fi
+
+    source "$VENV_DIR/bin/activate"
+
+    nohup python "$DAEMON_DIR/daemon/main.py" >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+
+    echo "Daemon started (PID: $(cat $PID_FILE))"
+    echo "Logs: $LOG_FILE"
+}
+
+stop() {
+    if [ ! -f "$PID_FILE" ]; then
+        echo "Daemon is not running (no PID file)"
+        return 1
+    fi
+
+    PID=$(cat "$PID_FILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        echo "Stopping daemon (PID: $PID)..."
+        kill "$PID"
+        rm -f "$PID_FILE"
+        rm -f "$SILENT_FLAG"
+        echo "Daemon stopped"
+    else
+        echo "Daemon was not running, cleaning up PID file"
+        rm -f "$PID_FILE"
+        rm -f "$SILENT_FLAG"
+    fi
+}
+
+status() {
+    if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        if [ -f "$SILENT_FLAG" ]; then
+            echo "Daemon is running (PID: $(cat $PID_FILE)) [silent mode]"
+        else
+            echo "Daemon is running (PID: $(cat $PID_FILE))"
+        fi
+    else
+        echo "Daemon is not running"
+    fi
+}
+
+foreground() {
+    # Set silent mode flag
+    if [ "$SILENT" = true ]; then
+        touch "$SILENT_FLAG"
+        echo "Running in foreground (silent mode - TTS disabled, Ctrl+C to stop)..."
+    else
+        rm -f "$SILENT_FLAG"
+        echo "Running in foreground (Ctrl+C to stop)..."
+    fi
+
+    source "$VENV_DIR/bin/activate"
+
+    # Clean up silent flag on exit
+    trap "rm -f '$SILENT_FLAG'" EXIT
+
+    python "$DAEMON_DIR/daemon/main.py"
+}
+
+# Get command (first non-flag argument)
+CMD=""
+for arg in "$@"; do
+    if [ "${arg:0:1}" != "-" ]; then
+        CMD="$arg"
+        break
+    fi
+done
+
+case "$CMD" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        stop
+        sleep 1
+        start
+        ;;
+    status)
+        status
+        ;;
+    foreground|fg)
+        foreground
+        ;;
+    voice-on)
+        rm -f "$SILENT_FLAG"
+        echo "Voice output enabled"
+        ;;
+    voice-off)
+        touch "$SILENT_FLAG"
+        echo "Voice output disabled"
+        ;;
+    *)
+        echo "Usage: $0 [--silent|-s] {start|stop|restart|status|foreground|voice-on|voice-off}"
+        echo ""
+        echo "Options:"
+        echo "  --silent, -s    Disable voice output (voice input only)"
+        echo ""
+        echo "Voice Control (run anytime):"
+        echo "  voice-on        Enable voice output"
+        echo "  voice-off       Disable voice output"
+        exit 1
+        ;;
+esac

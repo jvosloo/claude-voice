@@ -1,0 +1,125 @@
+"""Main daemon for Claude Voice - ties all components together."""
+
+import os
+import sys
+import subprocess
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.expanduser("~/.claude-voice"))
+
+from daemon.config import load_config
+from daemon.audio import AudioRecorder
+from daemon.transcribe import Transcriber
+from daemon.keyboard import KeyboardSimulator
+from daemon.hotkey import HotkeyListener
+
+SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
+
+class VoiceDaemon:
+    """Main voice input daemon."""
+
+    def __init__(self):
+        self.config = load_config()
+
+        self.recorder = AudioRecorder(
+            sample_rate=self.config.audio.sample_rate,
+            device=self.config.audio.input_device,
+        )
+
+        self.transcriber = Transcriber(
+            model_name=self.config.transcription.model,
+            device=self.config.transcription.device,
+            backend=self.config.transcription.backend,
+        )
+
+        self.keyboard = KeyboardSimulator(
+            typing_delay=self.config.input.typing_delay,
+            auto_submit=self.config.input.auto_submit,
+        )
+
+        self.hotkey_listener = HotkeyListener(
+            hotkey=self.config.input.hotkey,
+            on_press=self._on_hotkey_press,
+            on_release=self._on_hotkey_release,
+        )
+
+    def _on_hotkey_press(self) -> None:
+        """Called when hotkey is pressed - start recording."""
+        # Stop any TTS playback
+        subprocess.run(['pkill', '-9', 'afplay'], stderr=subprocess.DEVNULL)
+        print("Recording...")
+        self.recorder.start()
+
+    def _handle_voice_command(self, text: str) -> bool:
+        """Check for voice commands. Returns True if command was handled."""
+        text_lower = text.lower().strip().rstrip('.')
+
+        # Stop speaking commands
+        if text_lower in ["stop speaking", "stop talking"]:
+            with open(SILENT_FLAG, 'w') as f:
+                pass
+            print("Voice output disabled")
+            return True
+
+        # Start speaking commands
+        if text_lower in ["start speaking", "start talking"]:
+            if os.path.exists(SILENT_FLAG):
+                os.remove(SILENT_FLAG)
+            print("Voice output enabled")
+            return True
+
+        return False
+
+    def _on_hotkey_release(self) -> None:
+        """Called when hotkey is released - stop, transcribe, type."""
+        audio = self.recorder.stop()
+        duration = self.recorder.get_duration(audio)
+
+        if duration < self.config.input.min_audio_length:
+            print(f"Too short ({duration:.1f}s), ignoring")
+            return
+
+        print(f"Transcribing {duration:.1f}s of audio...")
+        text = self.transcriber.transcribe(audio)
+
+        if not text:
+            print("No speech detected")
+            return
+
+        # Check for voice commands first
+        if self._handle_voice_command(text):
+            return
+
+        print(f"Typing: {text}")
+        self.keyboard.type_text(text)
+
+    def run(self) -> None:
+        """Start the daemon."""
+        print("=" * 50)
+        print("Claude Voice Daemon")
+        print("=" * 50)
+        print(f"Hotkey: {self.config.input.hotkey} (hold to record)")
+        print(f"Model: {self.config.transcription.model}")
+        print("Press Ctrl+C to stop")
+        print("=" * 50)
+
+        # Pre-load Whisper model
+        print("Loading Whisper model (first time may take a moment)...")
+        self.transcriber._ensure_model()
+        print("Ready! Hold the hotkey and speak.")
+        print()
+
+        self.hotkey_listener.start()
+
+        try:
+            self.hotkey_listener.join()
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+            self.hotkey_listener.stop()
+
+def main():
+    daemon = VoiceDaemon()
+    daemon.run()
+
+if __name__ == "__main__":
+    main()
