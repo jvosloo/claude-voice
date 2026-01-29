@@ -3,6 +3,7 @@
 import os
 import sys
 import subprocess
+import threading
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.expanduser("~/.claude-voice"))
@@ -54,10 +55,14 @@ class VoiceDaemon:
 
     def _on_hotkey_press(self) -> None:
         """Called when hotkey is pressed - start recording."""
-        # Stop any TTS playback
-        subprocess.run(['pkill', '-9', 'afplay'], stderr=subprocess.DEVNULL)
-        print("Recording...")
+        # Start recording FIRST - minimize latency
         self.recorder.start()
+        print("Recording...")
+        # Stop any TTS playback asynchronously
+        threading.Thread(
+            target=lambda: subprocess.run(['pkill', '-9', 'afplay'], stderr=subprocess.DEVNULL),
+            daemon=True
+        ).start()
 
     def _handle_voice_command(self, text: str) -> bool:
         """Check for voice commands. Returns True if command was handled."""
