@@ -66,6 +66,16 @@ class AudioRecorder:
         """Stop recording and return audio as numpy array."""
         self._recording = False
 
+        # Close the stream to release the microphone
+        if self._stream:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except:
+                pass
+            self._stream = None
+            self._stream_active = False
+
         with self._lock:
             if self._audio_chunks:
                 audio = np.concatenate(self._audio_chunks, axis=0)
