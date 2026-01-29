@@ -19,13 +19,15 @@ cd claude-voice
 The installer will:
 - Create `~/.claude-voice/` with daemon files
 - Set up a Python virtual environment with dependencies
-- Download the default voice model
+- Download Piper TTS binary and default voice model
 - Install the Claude Code TTS hook
 - Optionally install MLX Whisper (recommended for Apple Silicon)
-- Prompt you to grant Accessibility permissions
+- Check and prompt for Microphone and Accessibility permissions
+- Optionally add shell aliases (`cv`, `cvf`, `cvs`)
 
-**Required:** Grant accessibility permissions to your terminal in
-System Settings > Privacy & Security > Accessibility
+**Required permissions** (the installer will guide you):
+- **Microphone** — for voice recording
+- **Accessibility** — for keyboard input simulation and hotkey detection
 
 ### Updating
 
@@ -90,16 +92,16 @@ Also accepts "stop talking" / "start talking".
 
 ## Setup
 
-### Shell Aliases (Recommended)
+### Shell Aliases
 
-Add to your `~/.bashrc` or `~/.zshrc`:
+The installer offers to add these aliases to your shell config. If you skipped that, add to `~/.zshrc` or `~/.bashrc`:
 ```bash
 alias cv="~/.claude-voice/claude-voice-daemon"
 alias cvf="~/.claude-voice/claude-voice-daemon foreground"
 alias cvs="~/.claude-voice/claude-voice-daemon --silent foreground"
 ```
 
-Then run `source ~/.bashrc` to load them.
+Then run `source ~/.zshrc` to load them.
 
 ### Quick Start
 
@@ -158,6 +160,8 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `auto_submit` | `false` | Press Enter automatically after transcription |
 | `min_audio_length` | `0.5` | Ignore recordings shorter than this (seconds) |
 | `typing_delay` | `0.01` | Delay between keystrokes (seconds) |
+| `transcription_cleanup` | `false` | Clean up transcription using local LLM (requires Ollama) |
+| `cleanup_model` | `qwen2.5:1.5b` | Ollama model for transcription cleanup |
 
 **Available hotkeys:** `right_alt`, `left_alt`, `right_cmd`, `left_cmd`, `right_ctrl`, `left_ctrl`, `right_shift`, `caps_lock`, `f18`, `f19`
 
