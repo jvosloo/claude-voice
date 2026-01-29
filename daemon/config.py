@@ -13,6 +13,9 @@ class InputConfig:
     auto_submit: bool = True
     min_audio_length: float = 0.5
     typing_delay: float = 0.01
+    transcription_cleanup: bool = False
+    cleanup_model: str = "qwen2.5:1.5b"
+    debug: bool = False
 
 @dataclass
 class TranscriptionConfig:

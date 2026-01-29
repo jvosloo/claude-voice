@@ -12,6 +12,7 @@ from daemon.audio import AudioRecorder
 from daemon.transcribe import Transcriber
 from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
+from daemon.cleanup import TranscriptionCleaner
 
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 
@@ -42,6 +43,14 @@ class VoiceDaemon:
             on_press=self._on_hotkey_press,
             on_release=self._on_hotkey_release,
         )
+
+        # Optional transcription cleanup via LLM
+        self.cleaner = None
+        if self.config.input.transcription_cleanup:
+            self.cleaner = TranscriptionCleaner(
+                model_name=self.config.input.cleanup_model,
+                debug=self.config.input.debug,
+            )
 
     def _on_hotkey_press(self) -> None:
         """Called when hotkey is pressed - start recording."""
@@ -86,11 +95,22 @@ class VoiceDaemon:
             print("No speech detected")
             return
 
+        # Clean up transcription if enabled
+        if self.cleaner:
+            original = text
+            text = self.cleaner.cleanup(text)
+            print(f"Whisper: {original}")
+            if text != original:
+                print(f"Cleaned: {text}")
+            else:
+                print("Cleaned: (no changes)")
+
         # Check for voice commands first
         if self._handle_voice_command(text):
             return
 
-        print(f"Typing: {text}")
+        print(f"Typing:  {text}")
+        print()
         self.keyboard.type_text(text)
 
     def run(self) -> None:
@@ -106,6 +126,12 @@ class VoiceDaemon:
         # Pre-load Whisper model
         print("Loading Whisper model (first time may take a moment)...")
         self.transcriber._ensure_model()
+
+        # Check transcription cleanup if enabled
+        if self.cleaner:
+            if not self.cleaner.ensure_ready():
+                self.cleaner = None  # Disable on failure
+
         print("Ready! Hold the hotkey and speak.")
         print()
 

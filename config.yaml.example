@@ -5,6 +5,8 @@ input:
   auto_submit: false           # Press Enter after transcription
   min_audio_length: 0.5        # Ignore recordings shorter than this (seconds)
   typing_delay: 0.01           # Delay between keystrokes (seconds)
+  transcription_cleanup: false # Enable LLM-based error correction
+  cleanup_model: "gemma2:2b"   # Ollama model for cleanup
 
 transcription:
   model: "large-v3"             # tiny.en, base.en, small.en, medium.en, large-v3
