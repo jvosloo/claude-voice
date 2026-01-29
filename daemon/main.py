@@ -4,6 +4,8 @@ import os
 import sys
 import subprocess
 import threading
+import numpy as np
+import sounddevice as sd
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.expanduser("~/.claude-voice"))
@@ -16,6 +18,31 @@ from daemon.hotkey import HotkeyListener
 from daemon.cleanup import TranscriptionCleaner
 
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
+
+def _play_cue(frequencies: list[int], duration: float = 0.05, sample_rate: int = 44100) -> None:
+    """Play a short audio cue with the given frequency sequence.
+
+    Args:
+        frequencies: List of frequencies to play in sequence (e.g., [440, 880] for ascending)
+        duration: Duration of each tone in seconds
+        sample_rate: Audio sample rate
+    """
+    def _play():
+        samples = []
+        for freq in frequencies:
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            # Sine wave with quick fade in/out to avoid clicks
+            tone = np.sin(2 * np.pi * freq * t)
+            fade_samples = int(sample_rate * 0.005)  # 5ms fade
+            tone[:fade_samples] *= np.linspace(0, 1, fade_samples)
+            tone[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+            samples.append(tone)
+
+        audio = np.concatenate(samples).astype(np.float32) * 0.3  # Low volume
+        sd.play(audio, sample_rate)
+        sd.wait()
+
+    threading.Thread(target=_play, daemon=True).start()
 
 class VoiceDaemon:
     """Main voice input daemon."""
@@ -57,6 +84,8 @@ class VoiceDaemon:
         """Called when hotkey is pressed - start recording."""
         # Start recording FIRST - minimize latency
         self.recorder.start()
+        # Play ascending cue to signal recording started
+        _play_cue([440, 880])
         print("Recording...")
         # Stop any TTS playback asynchronously
         threading.Thread(
@@ -87,6 +116,8 @@ class VoiceDaemon:
     def _on_hotkey_release(self) -> None:
         """Called when hotkey is released - stop, transcribe, type."""
         audio = self.recorder.stop()
+        # Play descending cue to signal recording stopped
+        _play_cue([880, 440])
         duration = self.recorder.get_duration(audio)
 
         if duration < self.config.input.min_audio_length:
