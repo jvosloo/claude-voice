@@ -28,7 +28,9 @@ class Transcriber:
         if self._model is None:
             if self.backend == "mlx":
                 print(f"Loading MLX Whisper model: {self.model_name}...")
-                # MLX models are loaded on first transcribe call
+                # Warm up MLX by doing a dummy transcription (triggers actual model load)
+                silent_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
+                self._transcribe_mlx(silent_audio)
                 self._model = "mlx"
                 print("MLX Whisper ready.")
             else:

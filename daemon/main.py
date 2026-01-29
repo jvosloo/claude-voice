@@ -116,7 +116,7 @@ class VoiceDaemon:
 
         print(f"Typing:  {text}")
         print()
-        self.keyboard.type_text(text)
+        self.keyboard.type_text(text + " ")
 
     def run(self) -> None:
         """Start the daemon."""
