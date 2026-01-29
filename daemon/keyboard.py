@@ -2,7 +2,6 @@
 
 import time
 from pynput.keyboard import Controller, Key
-from typing import Optional
 
 class KeyboardSimulator:
     """Types text by simulating keyboard input."""
@@ -27,6 +26,11 @@ class KeyboardSimulator:
                 time.sleep(self.typing_delay)
 
         if self.auto_submit:
-            time.sleep(0.1)  # Small pause before Enter
+            # Pause before Enter to let UI catch up
+            # Use whichever is longer: text-based pause or typing-time-based pause
+            text_pause = len(text) * 0.002  # 2ms per char for UI rendering
+            typing_time = len(text) * self.typing_delay
+            pause = max(0.1, text_pause, typing_time * 0.2)  # 20% of typing time
+            time.sleep(pause)
             self._keyboard.press(Key.enter)
             self._keyboard.release(Key.enter)

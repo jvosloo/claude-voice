@@ -2,9 +2,23 @@
 
 import os
 import sys
+import signal
 import subprocess
 import threading
 import numpy as np
+
+# Suppress multiprocessing resource_tracker warnings on forced shutdown
+# This happens when sounddevice's internal semaphores aren't cleaned up
+# Must be done BEFORE importing sounddevice which uses multiprocessing
+try:
+    from multiprocessing import resource_tracker
+    # Monkey-patch to prevent the warning on unclean exit
+    def _noop_warn(*args, **kwargs):
+        pass
+    resource_tracker._resource_tracker._warn = _noop_warn
+except (ImportError, AttributeError):
+    pass
+
 import sounddevice as sd
 
 # Add parent directory to path for imports
@@ -149,8 +163,30 @@ class VoiceDaemon:
         print()
         self.keyboard.type_text(text + " ")
 
+    def _shutdown(self) -> None:
+        """Clean shutdown of the daemon."""
+        print("\nShutting down...")
+        self.hotkey_listener.stop()
+        self.recorder.shutdown()
+
+        # Kill the multiprocessing resource_tracker to prevent semaphore warnings
+        # It's a separate subprocess that prints warnings after we exit
+        try:
+            from multiprocessing import resource_tracker
+            tracker = resource_tracker._resource_tracker
+            if tracker._pid is not None:
+                os.kill(tracker._pid, signal.SIGKILL)
+        except:
+            pass
+
+        # Exit immediately without Python's cleanup
+        os._exit(0)
+
     def run(self) -> None:
         """Start the daemon."""
+        # Handle SIGTERM (from kill command) gracefully
+        signal.signal(signal.SIGTERM, lambda sig, frame: self._shutdown())
+
         print("=" * 50)
         print("Claude Voice Daemon")
         print("=" * 50)
@@ -176,8 +212,7 @@ class VoiceDaemon:
         try:
             self.hotkey_listener.join()
         except KeyboardInterrupt:
-            print("\nShutting down...")
-            self.hotkey_listener.stop()
+            self._shutdown()
 
 def main():
     daemon = VoiceDaemon()

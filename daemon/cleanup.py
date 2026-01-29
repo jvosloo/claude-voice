@@ -1,9 +1,7 @@
 """LLM-based transcription cleanup using Ollama."""
 
 import subprocess
-import json
 import time
-from typing import Optional
 
 
 class TranscriptionCleaner:

@@ -10,7 +10,7 @@ CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
 @dataclass
 class InputConfig:
     hotkey: str = "right_alt"
-    auto_submit: bool = True
+    auto_submit: bool = False
     min_audio_length: float = 0.5
     typing_delay: float = 0.01
     transcription_cleanup: bool = False
@@ -27,7 +27,7 @@ class TranscriptionConfig:
 @dataclass
 class SpeechConfig:
     enabled: bool = True
-    voice: str = "en_US-amy-medium"
+    voice: str = "en_GB-alan-medium"
     speed: float = 1.0
     max_chars: Optional[int] = None
     skip_code_blocks: bool = True

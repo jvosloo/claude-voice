@@ -1,4 +1,6 @@
-#!/usr/bin/env -S bash -c '"$HOME/.claude-voice/venv/bin/python3" "$0" "$@"'
+#!/bin/bash
+# -*- mode: python -*-
+''''exec "$HOME/.claude-voice/venv/bin/python3" "$0" "$@" # '''
 """Claude Code hook to speak responses via Piper TTS."""
 
 import json
@@ -7,9 +9,9 @@ import re
 import subprocess
 import sys
 import tempfile
-import wave
 
 # Paths
+PIPER_BIN = os.path.expanduser("~/.claude-voice/piper/piper")
 MODELS_DIR = os.path.expanduser("~/.claude-voice/models/piper")
 CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
@@ -80,30 +82,36 @@ def clean_text_for_speech(text: str, config: dict) -> str:
     return text
 
 def speak(text: str, config: dict) -> None:
-    """Speak text using Piper TTS."""
+    """Speak text using Piper TTS binary."""
     if not text:
         return
 
-    voice_name = config.get('voice', 'en_US-amy-medium')
+    voice_name = config.get('voice', 'en_GB-alan-medium')
     voice_model = os.path.join(MODELS_DIR, f"{voice_name}.onnx")
 
     if not os.path.exists(voice_model):
         print(f"Voice model not found at {voice_model}", file=sys.stderr)
         return
 
+    if not os.path.exists(PIPER_BIN):
+        print(f"Piper binary not found at {PIPER_BIN}", file=sys.stderr)
+        return
+
     try:
-        from piper import PiperVoice
-
-        # Load voice model
-        voice = PiperVoice.load(voice_model)
-
         # Create temporary WAV file
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             tmp_path = tmp.name
 
-        # Synthesize to WAV file
-        with wave.open(tmp_path, 'wb') as wav_file:
-            voice.synthesize_wav(text, wav_file)
+        # Use Piper binary to synthesize
+        piper_proc = subprocess.run(
+            [PIPER_BIN, '--model', voice_model, '--output_file', tmp_path],
+            input=text.encode('utf-8'),
+            capture_output=True,
+        )
+
+        if piper_proc.returncode != 0:
+            print(f"Piper error: {piper_proc.stderr.decode()}", file=sys.stderr)
+            return
 
         # Play the audio (with speed adjustment)
         speed = config.get('speed', 1.0)

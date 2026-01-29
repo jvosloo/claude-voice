@@ -22,9 +22,30 @@ The installer will:
 - Download the default voice model
 - Install the Claude Code TTS hook
 - Optionally install MLX Whisper (recommended for Apple Silicon)
+- Prompt you to grant Accessibility permissions
 
 **Required:** Grant accessibility permissions to your terminal in
 System Settings > Privacy & Security > Accessibility
+
+### Updating
+
+To update to a new version, pull the latest code and re-run the installer:
+
+```bash
+cd claude-voice
+git pull
+./install.sh
+```
+
+The installer is idempotent — it will update daemon files and Python packages while preserving your `config.yaml`.
+
+### Uninstalling
+
+```bash
+./uninstall.sh
+```
+
+This removes all installed components. You'll be prompted before deleting your config and downloaded voice models.
 
 ---
 
@@ -170,11 +191,13 @@ Browse more at: https://huggingface.co/rhasspy/piper-voices/tree/main/en
 - `~/.claude-voice/daemon/` - Python modules
 - `~/.claude-voice/claude-voice-daemon` - Launch script
 - `~/.claude-voice/config.yaml` - Configuration file
+- `~/.claude-voice/logs/` - Installation and daemon logs
 
 ### Voice Output (Hook)
-- `~/.claude/hooks/speak-response.py` - TTS hook using Piper
+- `~/.claude-voice/piper/` - Piper TTS binary
+- `~/.claude/hooks/speak-response.py` - TTS hook
 - `~/.claude/settings.json` - Claude Code Stop hook config
 
 ### Models
-- `~/.claude-voice/models/whisper/` - Whisper speech recognition models
+- `~/.claude-voice/models/whisper/` - Whisper speech recognition models (auto-downloaded)
 - `~/.claude-voice/models/piper/` - Piper TTS voice models

@@ -80,7 +80,8 @@ foreground() {
 
     source "$VENV_DIR/bin/activate"
 
-    python "$DAEMON_DIR/daemon/main.py"
+    # Use exec to replace shell with Python (avoids "Terminated" message)
+    exec python "$DAEMON_DIR/daemon/main.py"
 }
 
 # Get command (first non-flag argument)
