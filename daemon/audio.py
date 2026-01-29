@@ -36,23 +36,27 @@ class AudioRecorder:
 
     def _ensure_stream(self) -> None:
         """Ensure the audio stream is open and running."""
-        if self._stream is None or not self._stream_active:
-            if self._stream:
-                try:
-                    self._stream.close()
-                except:
-                    pass
-
-            self._stream = sd.InputStream(
-                samplerate=self.sample_rate,
-                channels=1,
-                dtype=np.float32,
-                device=self.device,
-                callback=self._audio_callback,
-                blocksize=1024,  # Explicit blocksize helps avoid macOS errors
-            )
+        if self._stream is not None and self._stream_active:
+            # Stream exists but was stopped - restart it
             self._stream.start()
-            self._stream_active = True
+            return
+
+        if self._stream is not None:
+            try:
+                self._stream.close()
+            except:
+                pass
+
+        self._stream = sd.InputStream(
+            samplerate=self.sample_rate,
+            channels=1,
+            dtype=np.float32,
+            device=self.device,
+            callback=self._audio_callback,
+            blocksize=1024,  # Explicit blocksize helps avoid macOS errors
+        )
+        self._stream.start()
+        self._stream_active = True
 
     def start(self) -> None:
         """Start recording audio."""
@@ -66,15 +70,12 @@ class AudioRecorder:
         """Stop recording and return audio as numpy array."""
         self._recording = False
 
-        # Close the stream to release the microphone
+        # Stop the stream to release the microphone (but keep it for reuse)
         if self._stream:
             try:
                 self._stream.stop()
-                self._stream.close()
             except:
                 pass
-            self._stream = None
-            self._stream_active = False
 
         with self._lock:
             if self._audio_chunks:
