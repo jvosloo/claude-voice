@@ -49,12 +49,10 @@ stop() {
         echo "Stopping daemon (PID: $PID)..."
         kill "$PID"
         rm -f "$PID_FILE"
-        rm -f "$SILENT_FLAG"
         echo "Daemon stopped"
     else
         echo "Daemon was not running, cleaning up PID file"
         rm -f "$PID_FILE"
-        rm -f "$SILENT_FLAG"
     fi
 }
 
@@ -81,9 +79,6 @@ foreground() {
     fi
 
     source "$VENV_DIR/bin/activate"
-
-    # Clean up silent flag on exit
-    trap "rm -f '$SILENT_FLAG'" EXIT
 
     python "$DAEMON_DIR/daemon/main.py"
 }
