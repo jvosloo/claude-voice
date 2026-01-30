@@ -97,6 +97,45 @@ def speak(text: str, config: dict) -> None:
     except (ConnectionRefusedError, FileNotFoundError):
         pass  # Daemon not running, silent fail
 
+def send_with_context(text: str, config: dict) -> dict | None:
+    """Send text to daemon with session context. Returns daemon response."""
+    if not text:
+        return None
+
+    session = os.path.basename(os.getcwd())
+
+    # Get last N lines as context
+    context_lines = text.strip().split("\n")[-10:]
+    context = "\n".join(context_lines)
+
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(TTS_SOCK_PATH)
+        s.sendall(json.dumps({
+            "text": text,
+            "voice": config.get("voice", "af_heart"),
+            "speed": config.get("speed", 1.0),
+            "lang_code": config.get("lang_code", "a"),
+            "session": session,
+            "context": context,
+        }).encode())
+        s.shutdown(socket.SHUT_WR)
+        # Read response
+        data = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+        s.close()
+        if data:
+            return json.loads(data.decode())
+    except (ConnectionRefusedError, FileNotFoundError):
+        pass
+    except Exception:
+        pass
+    return None
+
 def main():
     # Read hook input from stdin
     try:
@@ -115,14 +154,23 @@ def main():
     if not config.get('enabled', True):
         return
     if os.path.exists(SILENT_FLAG):
-        return
+        # Check if in AFK mode (AFK overrides silent)
+        mode = ""
+        if os.path.exists(os.path.expanduser("~/.claude-voice/.mode")):
+            try:
+                with open(os.path.expanduser("~/.claude-voice/.mode")) as f:
+                    mode = f.read().strip()
+            except Exception:
+                pass
+        if mode != "afk":
+            return
 
     # Extract and clean the last response
     text = extract_last_assistant_message(transcript_path)
     text = clean_text_for_speech(text, config)
 
     if text:
-        speak(text, config)
+        send_with_context(text, config)
 
 if __name__ == "__main__":
     main()
