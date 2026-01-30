@@ -4,6 +4,7 @@ import numpy as np
 import sounddevice as sd
 from typing import Optional
 import threading
+import time
 import os
 
 # Suppress PortAudio debug messages on macOS
@@ -12,9 +13,10 @@ os.environ.setdefault('PA_ALSA_PLUGHW', '1')
 class AudioRecorder:
     """Records audio from microphone while activated.
 
-    Keeps the audio stream running continuously to avoid PortAudio
-    stop/restart errors on macOS (AUHAL error -50). The _recording
-    flag gates which callbacks actually capture data.
+    Opens the audio stream on start() and closes it on stop() so the
+    macOS microphone indicator turns off between recordings. Retries
+    stream creation once with a brief delay to handle PortAudio AUHAL
+    error -50 that can occur on rapid stop/start cycles.
     """
 
     def __init__(self, sample_rate: int = 16000, device: Optional[int] = None):
@@ -35,7 +37,11 @@ class AudioRecorder:
                 self._audio_chunks.append(indata.copy())
 
     def _ensure_stream(self) -> None:
-        """Ensure the audio stream is open and running."""
+        """Ensure the audio stream is open and running.
+
+        Retries once with a short delay if PortAudio fails, which
+        handles the AUHAL error -50 on rapid stop/start cycles.
+        """
         if self._stream is not None and self._stream.active:
             return
 
@@ -44,16 +50,25 @@ class AudioRecorder:
                 self._stream.close()
             except:
                 pass
+            self._stream = None
 
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=1,
-            dtype=np.float32,
-            device=self.device,
-            callback=self._audio_callback,
-            blocksize=1024,
-        )
-        self._stream.start()
+        for attempt in range(2):
+            try:
+                self._stream = sd.InputStream(
+                    samplerate=self.sample_rate,
+                    channels=1,
+                    dtype=np.float32,
+                    device=self.device,
+                    callback=self._audio_callback,
+                    blocksize=1024,
+                )
+                self._stream.start()
+                return
+            except sd.PortAudioError:
+                if attempt == 0:
+                    time.sleep(0.1)
+                else:
+                    raise
 
     def start(self) -> None:
         """Start recording audio."""
@@ -64,14 +79,26 @@ class AudioRecorder:
             self._recording = True
 
     def stop(self) -> np.ndarray:
-        """Stop recording and return audio as numpy array."""
+        """Stop recording, close the stream, and return audio as numpy array."""
         self._recording = False
 
         with self._lock:
             if self._audio_chunks:
                 audio = np.concatenate(self._audio_chunks, axis=0)
-                return audio.flatten()
-            return np.array([], dtype=np.float32)
+                result = audio.flatten()
+            else:
+                result = np.array([], dtype=np.float32)
+
+        # Close stream so macOS mic indicator turns off
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except:
+                pass
+            self._stream = None
+
+        return result
 
     def shutdown(self) -> None:
         """Close the audio stream completely. Call on daemon exit."""
