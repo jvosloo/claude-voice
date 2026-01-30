@@ -275,6 +275,11 @@ class VoiceDaemon:
         """Clean shutdown of the daemon."""
         print("\nShutting down...")
         self._shutting_down = True
+
+        # Hide overlay
+        from daemon import overlay
+        overlay.hide()
+
         if self._tts_server:
             try:
                 self._tts_server.close()
@@ -284,6 +289,14 @@ class VoiceDaemon:
             os.unlink(TTS_SOCK_PATH)
         self.hotkey_listener.stop()
         self.recorder.shutdown()
+
+        # Stop Cocoa run loop if running
+        try:
+            from AppKit import NSApplication
+            app = NSApplication.sharedApplication()
+            app.stop_(None)
+        except Exception:
+            pass
 
         # Kill the multiprocessing resource_tracker to prevent semaphore warnings
         # It's a separate subprocess that prints warnings after we exit
@@ -366,12 +379,33 @@ class VoiceDaemon:
         tts_thread.start()
         print(f"TTS server listening on {TTS_SOCK_PATH}")
 
+        # Initialize overlay on main thread
+        overlay_cfg = self.config.overlay
+        if overlay_cfg.enabled:
+            from daemon import overlay
+            overlay.init(
+                recording_color=overlay_cfg.recording_color,
+                transcribing_color=overlay_cfg.transcribing_color,
+            )
+
+        # Start hotkey listener on background thread
         self.hotkey_listener.start()
 
-        try:
-            self.hotkey_listener.join()
-        except KeyboardInterrupt:
-            self._shutdown()
+        if overlay_cfg.enabled:
+            # Run Cocoa run loop on main thread (required for NSWindow)
+            from AppKit import NSApplication
+            app = NSApplication.sharedApplication()
+            app.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory
+            try:
+                app.run()
+            except KeyboardInterrupt:
+                self._shutdown()
+        else:
+            # No overlay — block on hotkey listener as before
+            try:
+                self.hotkey_listener.join()
+            except KeyboardInterrupt:
+                self._shutdown()
 
 def main():
     daemon = VoiceDaemon()
