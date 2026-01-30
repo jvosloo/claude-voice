@@ -12,6 +12,10 @@ phonemizer
 spacy
 espeakng-loader
 
+# Overlay indicator (macOS, PyObjC)
+pyobjc-framework-Cocoa
+pyobjc-framework-Quartz
+
 # Speech-to-text (choose one backend)
 # For CPU (cross-platform):
 faster-whisper>=0.10.0
