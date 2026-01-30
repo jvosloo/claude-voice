@@ -118,6 +118,42 @@ Say these phrases to toggle voice output without leaving Claude:
 
 Also accepts "stop/start talking" and "notification/narration mode".
 
+### AFK Mode
+
+AFK mode lets you interact with Claude Code from your phone via Telegram when you're away from your keyboard. When Claude needs permission or input, you get a Telegram message and can respond directly.
+
+**Setup:**
+
+1. Open Telegram and search for **@BotFather**
+2. Send `/newbot` and follow the prompts to create a bot
+3. Copy the bot token
+4. Search for **@userinfobot** to find your chat ID
+5. Add both to your config:
+
+```yaml
+afk:
+  telegram:
+    bot_token: "123456:ABC-DEF..."
+    chat_id: "987654321"
+```
+
+**Usage:**
+
+| Action | Method |
+|--------|--------|
+| Activate | Say "going AFK" or press Right Alt+A |
+| Deactivate | Say "back at keyboard", press Right Alt+A, or send `/back` in Telegram |
+| Check status | Send `/status` in Telegram |
+| Approve permission | Tap Yes / No button |
+| Provide input | Type your reply in the Telegram chat |
+
+**Security:**
+
+- Messages are validated by chat ID (only your messages are accepted)
+- No ports opened on your machine (uses outbound long-polling)
+- Bot token stored in local config.yaml (gitignored)
+- Telegram can see message content (not end-to-end encrypted)
+
 ---
 
 ## Setup
