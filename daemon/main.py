@@ -139,6 +139,9 @@ class VoiceDaemon:
         # Play ascending cue to signal recording started
         _play_cue([440, 880])
         print("Recording...")
+        # Show overlay
+        from daemon import overlay
+        overlay.show_recording()
         # Stop any TTS playback
         self._interrupted_tts = self.tts_engine.stop_playback()
         if not self._interrupted_tts:
@@ -236,20 +239,25 @@ class VoiceDaemon:
 
     def _on_hotkey_release(self) -> None:
         """Called when hotkey is released - stop, transcribe, type."""
+        from daemon import overlay
+
         audio = self.recorder.stop()
         # Play descending cue to signal recording stopped
         _play_cue([880, 440])
         duration = self.recorder.get_duration(audio)
 
         if duration < self.config.input.min_audio_length:
+            overlay.hide()
             if duration > 0.1 and not self._interrupted_tts:
                 print(f"Too short ({duration:.1f}s), ignoring")
             return
 
+        overlay.show_transcribing()
         print(f"Transcribing {duration:.1f}s of audio...")
         text = self.transcriber.transcribe(audio)
 
         if not text:
+            overlay.hide()
             print("No speech detected")
             return
 
@@ -265,11 +273,13 @@ class VoiceDaemon:
 
         # Check for voice commands first
         if self._handle_voice_command(text):
+            overlay.hide()
             return
 
         print(f"Typing:  {text}")
         print()
         self.keyboard.type_text(text + " ")
+        overlay.hide()
 
     def _shutdown(self) -> None:
         """Clean shutdown of the daemon."""
