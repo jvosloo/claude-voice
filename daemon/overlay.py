@@ -1,7 +1,6 @@
 """Floating overlay indicator for voice input state."""
 
 import math
-import threading
 
 try:
     import objc
@@ -12,10 +11,8 @@ try:
         NSScreen,
         NSBezierPath,
         NSBackingStoreBuffered,
-        NSShadow,
-        NSGraphicsContext,
     )
-    from Foundation import NSSize, NSTimer, NSObject, NSMakeRect
+    from Foundation import NSTimer, NSObject, NSMakeRect
     from Quartz import (
         CGWindowLevelForKey,
         kCGMaximumWindowLevelKey,
@@ -34,68 +31,144 @@ def _hex_to_nscolor(hex_str: str, alpha: float = 1.0):
 
 
 # Pill dimensions (points)
-PILL_WIDTH = 100
-PILL_HEIGHT = 40
+PILL_WIDTH = 120
+PILL_HEIGHT = 36
 PILL_RADIUS = PILL_HEIGHT / 2
 MARGIN_TOP = 10  # below menu bar
 
 # Animation
-PULSE_INTERVAL = 0.03  # ~30fps timer for pulse animation
-PULSE_CYCLE = 1.5  # seconds per full pulse cycle
+ANIM_INTERVAL = 0.03  # ~30fps
+
+# Waveform bars (recording)
+NUM_BARS = 7
+BAR_WIDTH = 4
+BAR_GAP = 3
+BAR_MIN_H = 4
+BAR_MAX_H = 20
+# Each bar oscillates at a different speed for organic movement
+BAR_SPEEDS = [2.7, 3.4, 2.1, 3.9, 2.5, 3.1, 2.8]
+
+# Typing dots (transcribing)
+NUM_DOTS = 3
+DOT_RADIUS = 4
+DOT_GAP = 12
+DOT_BOUNCE = 6  # vertical bounce distance
+DOT_CYCLE = 1.2  # seconds for full cycle
+DOT_STAGGER = 0.18  # seconds delay between each dot
 
 
 if PYOBJC_AVAILABLE:
 
     class _PillView(NSView):
-        """Custom view that draws a rounded pill with configurable color and glow."""
+        """Custom view that draws a pill with animated content."""
 
         def initWithFrame_(self, frame):
             self = objc.super(_PillView, self).initWithFrame_(frame)
             if self is None:
                 return None
-            self._color = NSColor.greenColor()
-            self._glow_alpha = 0.0
-            self._glow_color = NSColor.greenColor()
+            self._bg_color = NSColor.greenColor()
+            self._fg_color = NSColor.whiteColor()
+            self._mode = "idle"  # idle, recording, transcribing
+            self._phase = 0.0
             return self
 
-        def setColor_(self, color):
-            self._color = color
-            self._glow_color = color
+        def setBackgroundColor_(self, color):
+            self._bg_color = color
             self.setNeedsDisplay_(True)
 
-        def setGlowAlpha_(self, alpha):
-            self._glow_alpha = alpha
+        def setForegroundColor_(self, color):
+            self._fg_color = color
+
+        def setMode_(self, mode):
+            self._mode = mode
+            self._phase = 0.0
+            self.setNeedsDisplay_(True)
+
+        def setPhase_(self, phase):
+            self._phase = phase
             self.setNeedsDisplay_(True)
 
         def drawRect_(self, rect):
             bounds = self.bounds()
-            path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+            pill = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
                 bounds, PILL_RADIUS, PILL_RADIUS
             )
 
-            # Draw glow (shadow) behind pill
-            if self._glow_alpha > 0:
-                context = NSGraphicsContext.currentContext()
-                context.saveGraphicsState()
-                shadow = NSShadow.alloc().init()
-                shadow.setShadowOffset_(NSSize(0, 0))
-                shadow.setShadowBlurRadius_(15.0 * self._glow_alpha)
-                glow = self._glow_color.colorWithAlphaComponent_(
-                    0.6 * self._glow_alpha
-                )
-                shadow.setShadowColor_(glow)
-                shadow.set()
-                self._color.colorWithAlphaComponent_(0.9).setFill()
-                path.fill()
-                context.restoreGraphicsState()
-            else:
-                self._color.colorWithAlphaComponent_(0.9).setFill()
-                path.fill()
+            # Background fill
+            self._bg_color.colorWithAlphaComponent_(0.92).setFill()
+            pill.fill()
 
-            # Dark border
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(0, 0, 0, 0.2).setStroke()
-            path.setLineWidth_(1.0)
-            path.stroke()
+            # Subtle border
+            NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0, 0, 0, 0.15
+            ).setStroke()
+            pill.setLineWidth_(0.5)
+            pill.stroke()
+
+            # Draw animated content
+            if self._mode == "recording":
+                self._draw_waveform(bounds)
+            elif self._mode == "transcribing":
+                self._draw_dots(bounds)
+
+        def _draw_waveform(self, bounds):
+            """Draw animated waveform bars."""
+            total_w = NUM_BARS * BAR_WIDTH + (NUM_BARS - 1) * BAR_GAP
+            start_x = (bounds.size.width - total_w) / 2
+            center_y = bounds.size.height / 2
+
+            self._fg_color.colorWithAlphaComponent_(0.95).setFill()
+
+            for i in range(NUM_BARS):
+                # Each bar has its own sine frequency for organic movement
+                speed = BAR_SPEEDS[i]
+                wave = math.sin(self._phase * speed * 2 * math.pi)
+                # Map sine (-1..1) to bar height range
+                h = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * (wave + 1) / 2
+
+                x = start_x + i * (BAR_WIDTH + BAR_GAP)
+                y = center_y - h / 2
+
+                bar = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+                    NSMakeRect(x, y, BAR_WIDTH, h),
+                    BAR_WIDTH / 2,
+                    BAR_WIDTH / 2,
+                )
+                bar.fill()
+
+        def _draw_dots(self, bounds):
+            """Draw bouncing typing-indicator dots."""
+            total_w = NUM_DOTS * (DOT_RADIUS * 2) + (NUM_DOTS - 1) * DOT_GAP
+            start_x = (bounds.size.width - total_w) / 2
+            base_y = bounds.size.height / 2
+
+            for i in range(NUM_DOTS):
+                # Stagger each dot's phase
+                dot_phase = self._phase - i * DOT_STAGGER / DOT_CYCLE
+                # Normalize to 0..1 cycle
+                t = dot_phase % 1.0
+                # Smooth bounce: use sine for up, quick return down
+                if t < 0.4:
+                    # Going up and down (bounce portion)
+                    bounce = math.sin(t / 0.4 * math.pi) * DOT_BOUNCE
+                else:
+                    # Resting
+                    bounce = 0.0
+
+                cx = start_x + DOT_RADIUS + i * (DOT_RADIUS * 2 + DOT_GAP)
+                cy = base_y + bounce
+
+                # Dot alpha: slightly dim when resting
+                alpha = 0.95 if t < 0.4 else 0.5
+                self._fg_color.colorWithAlphaComponent_(alpha).setFill()
+
+                dot = NSBezierPath.bezierPathWithOvalInRect_(
+                    NSMakeRect(
+                        cx - DOT_RADIUS, cy - DOT_RADIUS,
+                        DOT_RADIUS * 2, DOT_RADIUS * 2,
+                    )
+                )
+                dot.fill()
 
     class OverlayController(NSObject):
         """Controls the floating overlay window. All public methods are thread-safe."""
@@ -106,8 +179,8 @@ if PYOBJC_AVAILABLE:
                 return None
             self._window = None
             self._pill_view = None
-            self._pulse_timer = None
-            self._pulse_phase = 0.0
+            self._anim_timer = None
+            self._anim_phase = 0.0
             self._state = "idle"  # idle, recording, transcribing
             self._recording_color = None
             self._transcribing_color = None
@@ -119,7 +192,6 @@ if PYOBJC_AVAILABLE:
 
         def setup(self):
             """Create the overlay window. Must be called on the main thread."""
-            # Get screen dimensions
             screen = NSScreen.mainScreen()
             screen_frame = screen.frame()
             visible = screen.visibleFrame()
@@ -127,7 +199,6 @@ if PYOBJC_AVAILABLE:
                 screen_frame.size.height - visible.size.height - visible.origin.y
             )
 
-            # Position centered horizontally, below menu bar
             x = (screen_frame.size.width - PILL_WIDTH) / 2
             y = screen_frame.size.height - menu_bar_height - PILL_HEIGHT - MARGIN_TOP
 
@@ -152,16 +223,14 @@ if PYOBJC_AVAILABLE:
             self._window.setHasShadow_(True)
             self._window.setAlphaValue_(0.0)
 
-            # Create pill view
             pill_rect = NSMakeRect(0, 0, PILL_WIDTH, PILL_HEIGHT)
             self._pill_view = _PillView.alloc().initWithFrame_(pill_rect)
             self._window.contentView().addSubview_(self._pill_view)
 
-            # Order window to front but keep it hidden (alpha=0)
             self._window.orderFrontRegardless()
 
         def show_recording(self):
-            """Show green pill (recording state). Thread-safe."""
+            """Show pill with waveform animation. Thread-safe."""
             if self._window is None:
                 return
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -169,7 +238,7 @@ if PYOBJC_AVAILABLE:
             )
 
         def show_transcribing(self):
-            """Transition to purple pulsing pill (transcribing state). Thread-safe."""
+            """Show pill with bouncing dots animation. Thread-safe."""
             if self._window is None:
                 return
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -185,46 +254,52 @@ if PYOBJC_AVAILABLE:
             )
 
         def doShowRecording(self):
-            """Main thread: show green pill."""
-            self._stop_pulse()
+            """Main thread: show green pill with waveform bars."""
+            self._stop_anim()
             self._state = "recording"
-            self._pill_view.setColor_(self._recording_color)
-            self._pill_view.setGlowAlpha_(0.0)
+            self._pill_view.setBackgroundColor_(self._recording_color)
+            self._pill_view.setForegroundColor_(
+                NSColor.whiteColor()
+            )
+            self._pill_view.setMode_("recording")
             self._window.setAlphaValue_(1.0)
+            self._start_anim()
 
         def doShowTranscribing(self):
-            """Main thread: transition to purple pulsing pill."""
-            self._stop_pulse()
+            """Main thread: show purple pill with bouncing dots."""
+            self._stop_anim()
             self._state = "transcribing"
-            self._pill_view.setColor_(self._transcribing_color)
-            self._start_pulse()
+            self._pill_view.setBackgroundColor_(self._transcribing_color)
+            self._pill_view.setForegroundColor_(
+                NSColor.whiteColor()
+            )
+            self._pill_view.setMode_("transcribing")
+            self._start_anim()
 
         def doHide(self):
             """Main thread: hide the pill."""
-            self._stop_pulse()
+            self._stop_anim()
             self._state = "idle"
+            self._pill_view.setMode_("idle")
             self._window.setAlphaValue_(0.0)
 
-        def _start_pulse(self):
-            """Start the glow pulse animation timer."""
-            self._pulse_phase = 0.0
-            self._pulse_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                PULSE_INTERVAL, self, "pulseTick:", None, True
+        def _start_anim(self):
+            """Start the animation timer."""
+            self._anim_phase = 0.0
+            self._anim_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                ANIM_INTERVAL, self, "animTick:", None, True
             )
 
-        def _stop_pulse(self):
-            """Stop the pulse animation timer."""
-            if self._pulse_timer:
-                self._pulse_timer.invalidate()
-                self._pulse_timer = None
+        def _stop_anim(self):
+            """Stop the animation timer."""
+            if self._anim_timer:
+                self._anim_timer.invalidate()
+                self._anim_timer = None
 
-        def pulseTick_(self, timer):
-            """Timer callback: update glow alpha for pulse effect."""
-            self._pulse_phase += PULSE_INTERVAL
-            # Sine wave: 0 -> 1 -> 0 over PULSE_CYCLE seconds
-            t = (self._pulse_phase % PULSE_CYCLE) / PULSE_CYCLE
-            glow = (math.sin(t * 2 * math.pi - math.pi / 2) + 1) / 2
-            self._pill_view.setGlowAlpha_(glow)
+        def animTick_(self, timer):
+            """Timer callback: advance animation phase and redraw."""
+            self._anim_phase += ANIM_INTERVAL
+            self._pill_view.setPhase_(self._anim_phase)
 
 
 # Module-level singleton
