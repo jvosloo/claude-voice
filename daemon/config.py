@@ -24,15 +24,23 @@ class TranscriptionConfig:
     device: str = "cpu"
     backend: str = "faster-whisper"  # "faster-whisper" or "mlx"
 
+DEFAULT_NOTIFY_PHRASES = {
+    "permission": "Permission needed",
+    "done": "Ready for input",
+    "error": "Something failed",
+}
+
 @dataclass
 class SpeechConfig:
     enabled: bool = True
+    mode: str = "notify"                   # "notify" or "narrate"
     voice: str = "af_heart"
     speed: float = 1.0
     lang_code: str = "a"
     max_chars: Optional[int] = None
     skip_code_blocks: bool = True
     skip_tool_results: bool = True
+    notify_phrases: Optional[dict] = None  # Custom phrase overrides
 
 @dataclass
 class AudioConfig:
@@ -54,9 +62,13 @@ def load_config() -> Config:
     else:
         data = {}
 
+    # Strip removed config keys for backward compatibility
+    speech_data = data.get('speech', {})
+    speech_data.pop('notify_model', None)
+
     return Config(
         input=InputConfig(**data.get('input', {})),
         transcription=TranscriptionConfig(**data.get('transcription', {})),
-        speech=SpeechConfig(**data.get('speech', {})),
+        speech=SpeechConfig(**speech_data),
         audio=AudioConfig(**data.get('audio', {})),
     )

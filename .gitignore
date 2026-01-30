@@ -17,6 +17,9 @@ models/
 *.log
 logs/
 .silent
+.mode
+.error_pending
+notify_cache/
 
 # macOS
 .DS_Store

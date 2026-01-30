@@ -136,6 +136,7 @@ else
     echo "Installing daemon modules..."
 fi
 cp "$SCRIPT_DIR"/daemon/*.py "$INSTALL_DIR/daemon/"
+cp -r "$SCRIPT_DIR/daemon/notify_phrases" "$INSTALL_DIR/daemon/"
 cp "$SCRIPT_DIR/claude-voice-daemon" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/claude-voice-daemon"
 
@@ -292,9 +293,13 @@ else
 fi
 
 # Install Claude Code hook
-echo "Installing Claude Code hook..."
+echo "Installing Claude Code hooks..."
 cp "$SCRIPT_DIR/hooks/speak-response.py" "$CLAUDE_HOOKS_DIR/"
+cp "$SCRIPT_DIR/hooks/notify-permission.py" "$CLAUDE_HOOKS_DIR/"
+cp "$SCRIPT_DIR/hooks/notify-error.py" "$CLAUDE_HOOKS_DIR/"
 chmod +x "$CLAUDE_HOOKS_DIR/speak-response.py"
+chmod +x "$CLAUDE_HOOKS_DIR/notify-permission.py"
+chmod +x "$CLAUDE_HOOKS_DIR/notify-error.py"
 
 # Update Claude settings for hook
 echo "Configuring Claude Code settings..."
@@ -323,10 +328,26 @@ settings['hooks']['Stop'] = [{
     }]
 }]
 
+settings['hooks']['Notification'] = [{
+    "matcher": "permission_prompt",
+    "hooks": [{
+        "type": "command",
+        "command": "~/.claude/hooks/notify-permission.py"
+    }]
+}]
+
+settings['hooks']['PostToolUseFailure'] = [{
+    "matcher": "Bash",
+    "hooks": [{
+        "type": "command",
+        "command": "~/.claude/hooks/notify-error.py"
+    }]
+}]
+
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
 
-print("Added Stop hook to settings.json")
+print("Added Stop, Notification, and PostToolUseFailure hooks to settings.json")
 EOF
     fi
 else
@@ -344,11 +365,33 @@ else
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/notify-permission.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/notify-error.py"
+          }
+        ]
+      }
     ]
   }
 }
 EOF
-    echo "Created settings.json with Stop hook"
+    echo "Created settings.json with Stop, Notification, and PostToolUseFailure hooks"
 fi
 
 # macOS permissions check
@@ -437,6 +480,17 @@ EOF
     fi
     echo ""
 fi
+
+# Notify mode info
+echo ""
+echo "=================================="
+echo "Notify Mode"
+echo "=================================="
+echo ""
+echo "Notify mode plays short status phrases instead of reading responses aloud."
+echo "Error detection uses Claude Code hooks (no LLM required)."
+echo "Switch at runtime with voice command: 'switch to notify mode'"
+echo ""
 
 # Add shell aliases (only on fresh install)
 if [ "$IS_UPDATE" != true ]; then

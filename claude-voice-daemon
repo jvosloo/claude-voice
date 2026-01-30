@@ -5,6 +5,7 @@ VENV_DIR="$DAEMON_DIR/venv"
 PID_FILE="$DAEMON_DIR/daemon.pid"
 LOG_FILE="$DAEMON_DIR/logs/daemon.log"
 SILENT_FLAG="$DAEMON_DIR/.silent"
+MODE_FILE="$DAEMON_DIR/.mode"
 
 # Check for --silent flag
 SILENT=false
@@ -58,10 +59,14 @@ stop() {
 
 status() {
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
+        MODE="narrate"
+        if [ -f "$MODE_FILE" ]; then
+            MODE=$(cat "$MODE_FILE")
+        fi
         if [ -f "$SILENT_FLAG" ]; then
             echo "Daemon is running (PID: $(cat $PID_FILE)) [silent mode]"
         else
-            echo "Daemon is running (PID: $(cat $PID_FILE))"
+            echo "Daemon is running (PID: $(cat $PID_FILE)) [$MODE mode]"
         fi
     else
         echo "Daemon is not running"
@@ -82,6 +87,20 @@ foreground() {
 
     # Use exec to replace shell with Python (avoids "Terminated" message)
     exec python "$DAEMON_DIR/daemon/main.py"
+}
+
+set_mode() {
+    MODE="$1"
+    if [ "$MODE" != "narrate" ] && [ "$MODE" != "notify" ]; then
+        echo "Usage: $0 mode {narrate|notify}"
+        echo ""
+        echo "Modes:"
+        echo "  notify    Play short status phrases (default)"
+        echo "  narrate   Read Claude's full response aloud"
+        return 1
+    fi
+    echo "$MODE" > "$MODE_FILE"
+    echo "TTS mode set to: $MODE"
 }
 
 # Get command (first non-flag argument)
@@ -119,8 +138,23 @@ case "$CMD" in
         touch "$SILENT_FLAG"
         echo "Voice output disabled"
         ;;
+    mode)
+        # Get the mode argument (next non-flag arg after "mode")
+        MODE_ARG=""
+        FOUND_MODE=false
+        for arg in "$@"; do
+            if [ "$FOUND_MODE" = true ] && [ "${arg:0:1}" != "-" ]; then
+                MODE_ARG="$arg"
+                break
+            fi
+            if [ "$arg" = "mode" ]; then
+                FOUND_MODE=true
+            fi
+        done
+        set_mode "$MODE_ARG"
+        ;;
     *)
-        echo "Usage: $0 [--silent|-s] {start|stop|restart|status|foreground|voice-on|voice-off}"
+        echo "Usage: $0 [--silent|-s] {start|stop|restart|status|foreground|voice-on|voice-off|mode}"
         echo ""
         echo "Options:"
         echo "  --silent, -s    Disable voice output (voice input only)"
@@ -128,6 +162,10 @@ case "$CMD" in
         echo "Voice Control (run anytime):"
         echo "  voice-on        Enable voice output"
         echo "  voice-off       Disable voice output"
+        echo ""
+        echo "TTS Mode:"
+        echo "  mode narrate  Read full responses aloud"
+        echo "  mode notify   Play short status phrases"
         exit 1
         ;;
 esac

@@ -2,6 +2,9 @@
 
 import os
 import sys
+
+# Ensure print output is unbuffered (visible in log files when running in background)
+sys.stdout.reconfigure(line_buffering=True)
 import signal
 import threading
 import json
@@ -32,12 +35,34 @@ from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
 from daemon.cleanup import TranscriptionCleaner
 from daemon.tts import TTSEngine
+from daemon.notify import classify, play_phrase, stop_playback as stop_notify_playback, ERROR_FLAG
 
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
+MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
 
 _cue_stream: sd.OutputStream | None = None
 _cue_lock = threading.Lock()
+
+
+def _read_mode() -> str:
+    """Read the current TTS mode from the mode file. Defaults to narrate."""
+    if os.path.exists(MODE_FILE):
+        try:
+            with open(MODE_FILE) as f:
+                mode = f.read().strip()
+            if mode in ("narrate", "notify"):
+                return mode
+        except Exception:
+            pass
+    return "narrate"
+
+
+def _write_mode(mode: str) -> None:
+    """Write the current TTS mode to the mode file."""
+    with open(MODE_FILE, "w") as f:
+        f.write(mode)
+
 
 def _play_cue(frequencies: list[int], duration: float = 0.05, sample_rate: int = 44100) -> None:
     """Play a short audio cue with the given frequency sequence."""
@@ -116,6 +141,8 @@ class VoiceDaemon:
         print("Recording...")
         # Stop any TTS playback
         self._interrupted_tts = self.tts_engine.stop_playback()
+        if not self._interrupted_tts:
+            self._interrupted_tts = stop_notify_playback()
 
     def _handle_voice_command(self, text: str) -> bool:
         """Check for voice commands. Returns True if command was handled."""
@@ -135,6 +162,17 @@ class VoiceDaemon:
             print("Voice output enabled")
             return True
 
+        # Mode switching commands
+        if text_lower in ["switch to narrate mode", "switch to narration mode"]:
+            _write_mode("narrate")
+            print("Switched to narrate mode")
+            return True
+
+        if text_lower in ["switch to notify mode", "switch to notification mode"]:
+            _write_mode("notify")
+            print("Switched to notify mode")
+            return True
+
         return False
 
     def _run_tts_server(self) -> None:
@@ -145,7 +183,7 @@ class VoiceDaemon:
 
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(TTS_SOCK_PATH)
-        server.listen(1)
+        server.listen(5)
         server.settimeout(1.0)  # Allow periodic shutdown checks
 
         self._tts_server = server
@@ -168,13 +206,27 @@ class VoiceDaemon:
                 conn.close()
 
                 request = json.loads(data.decode())
+
+                # Direct category from hooks (e.g. PreToolUse permission)
+                notify_category = request.get("notify_category")
+                if notify_category:
+                    print(f"Notify: {notify_category}")
+                    play_phrase(notify_category, self.config.speech.notify_phrases)
+                    continue
+
                 text = request.get("text", "")
                 voice = request.get("voice", self.config.speech.voice)
                 speed = request.get("speed", self.config.speech.speed)
                 lang_code = request.get("lang_code", self.config.speech.lang_code)
 
                 if text:
-                    self.tts_engine.speak(text, voice=voice, speed=speed, lang_code=lang_code)
+                    mode = _read_mode()
+                    if mode == "notify":
+                        category = classify(text)
+                        print(f"Notify: {category}")
+                        play_phrase(category, self.config.speech.notify_phrases)
+                    else:
+                        self.tts_engine.speak(text, voice=voice, speed=speed, lang_code=lang_code)
             except Exception as e:
                 print(f"TTS server error: {e}")
 
@@ -259,25 +311,47 @@ class VoiceDaemon:
         print("Press Ctrl+C to stop")
         print("=" * 50)
 
+        # Initialize mode from config (only if no mode file exists yet)
+        if not os.path.exists(MODE_FILE):
+            _write_mode(self.config.speech.mode)
+        print(f"TTS mode: {_read_mode()}")
+
+        # Clean up stale error flag from previous session
+        if os.path.exists(ERROR_FLAG):
+            os.remove(ERROR_FLAG)
+
         # Pre-load models
         self.transcriber._ensure_model()
         if self.config.speech.enabled:
             self.tts_engine._ensure_model()
 
-            # Sound check
-            print('\nSound check: playing "Hello!! Can you hear me?"')
-            self.tts_engine.speak(
-                "Hello!! Can you hear me?",
+            # Sound check (only in interactive/foreground mode)
+            if sys.stdin.isatty():
+                print('\nSound check: playing "Hello!! Can you hear me?"')
+                self.tts_engine.speak(
+                    "Hello!! Can you hear me?",
+                    voice=self.config.speech.voice,
+                    speed=self.config.speech.speed,
+                    lang_code=self.config.speech.lang_code,
+                )
+                answer = input("Did you hear the test phrase? [Y/n] ").strip().lower()
+                if answer in ("n", "no"):
+                    print("Tip: check your audio output device and volume settings.")
+                    print("Continuing startup anyway...\n")
+                else:
+                    print("Sound check passed.\n")
+
+        # Regenerate custom notify phrases if needed
+        if self.config.speech.mode == "notify" or self.config.speech.notify_phrases:
+            from daemon.notify import regenerate_custom_phrases
+            is_foreground = sys.stdin.isatty()
+            regenerate_custom_phrases(
+                self.config.speech.notify_phrases,
                 voice=self.config.speech.voice,
                 speed=self.config.speech.speed,
                 lang_code=self.config.speech.lang_code,
+                interactive=is_foreground,
             )
-            answer = input("Did you hear the test phrase? [Y/n] ").strip().lower()
-            if answer in ("n", "no"):
-                print("Tip: check your audio output device and volume settings.")
-                print("Continuing startup anyway...\n")
-            else:
-                print("Sound check passed.\n")
 
         # Check transcription cleanup if enabled
         if self.cleaner:

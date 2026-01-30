@@ -2,7 +2,9 @@
 
 Push-to-talk voice input for macOS. Transcribes speech and types it into any focused application.
 
-When used with Claude Code, responses are spoken aloud via neural TTS — enabling two-way voice conversation.
+When used with Claude Code, two voice output modes are available:
+- **Notify mode** (default) — plays short status phrases ("Ready for input", "Something failed", "Permission needed")
+- **Narrate mode** — reads Claude's full response aloud via neural TTS
 
 **Platform:** macOS (uses `afplay` for audio playback)
 
@@ -71,6 +73,8 @@ This removes all installed components. You'll be prompted before deleting your c
 | `cv status` | Check if daemon is running |
 | `cv voice-off` | Disable voice output |
 | `cv voice-on` | Enable voice output |
+| `cv mode notify` | Switch to notify mode (short status phrases) |
+| `cv mode narrate` | Switch to narrate mode (read full responses) |
 
 ### Voice Input (Works Anywhere)
 
@@ -93,8 +97,10 @@ Say these phrases to toggle voice output without leaving Claude:
 |----------|--------|
 | **"Stop speaking"** | Disable voice output |
 | **"Start speaking"** | Enable voice output |
+| **"Switch to notify mode"** | Short status phrases |
+| **"Switch to narrate mode"** | Read full responses aloud |
 
-Also accepts "stop talking" / "start talking".
+Also accepts "stop/start talking" and "notification/narration mode".
 
 ---
 
@@ -136,10 +142,12 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `voice` | `af_heart` | Kokoro voice ID (see Available Voices below) |
 | `speed` | `1.0` | Playback speed (1.0 = normal) |
 | `lang_code` | `a` | Language code: `a` American, `b` British, `j` Japanese, `z` Chinese, `e` Spanish, `f` French |
+| `mode` | `notify` | `notify` (status phrases) or `narrate` (read full responses) |
 | `enabled` | `true` | Enable/disable TTS output |
 | `max_chars` | `null` | Limit spoken output length (`null` = unlimited) |
 | `skip_code_blocks` | `true` | Don't speak code blocks |
 | `skip_tool_results` | `true` | Don't speak tool result output |
+| `notify_phrases` | *(defaults)* | Custom phrase overrides per category (permission, done, error) |
 
 ### Transcription Settings
 
@@ -222,9 +230,11 @@ Full voice list: https://huggingface.co/mlx-community/Kokoro-82M-bf16/blob/main/
 - `~/.claude-voice/config.yaml` - Configuration file
 - `~/.claude-voice/logs/` - Installation and daemon logs
 
-### Voice Output (Hook + Daemon)
-- `~/.claude/hooks/speak-response.py` - Hook sends text to daemon
-- `~/.claude/settings.json` - Claude Code Stop hook config
+### Voice Output (Hooks + Daemon)
+- `~/.claude/hooks/speak-response.py` - Stop hook: sends response text to daemon
+- `~/.claude/hooks/notify-permission.py` - Notification hook: signals permission prompts
+- `~/.claude/hooks/notify-error.py` - PostToolUseFailure hook: signals Bash errors
+- `~/.claude/settings.json` - Hook configuration (Stop, Notification, PostToolUseFailure)
 - `~/.claude-voice/.tts.sock` - Unix socket for hook-to-daemon TTS communication (runtime)
 - Kokoro TTS model cached at `~/.cache/huggingface/hub/models--mlx-community--Kokoro-82M-bf16/`
 

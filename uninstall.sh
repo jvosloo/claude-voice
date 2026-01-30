@@ -63,15 +63,17 @@ if [ "$DAEMON_STOPPED" = true ]; then
     sleep 1
 fi
 
-# Remove Claude Code hook
+# Remove Claude Code hooks
 if [ -f "$CLAUDE_HOOKS_DIR/speak-response.py" ]; then
-    echo "Removing Claude Code hook..."
+    echo "Removing Claude Code hooks..."
     rm -f "$CLAUDE_HOOKS_DIR/speak-response.py"
 fi
+rm -f "$CLAUDE_HOOKS_DIR/notify-permission.py"
+rm -f "$CLAUDE_HOOKS_DIR/notify-error.py"
 
-# Remove Stop hook from settings.json
-if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"Stop"' "$CLAUDE_SETTINGS"; then
-    echo "Removing Stop hook from Claude settings..."
+# Remove hooks from settings.json
+if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"Stop"\|"Notification"\|"PostToolUseFailure"' "$CLAUDE_SETTINGS"; then
+    echo "Removing Claude Voice hooks from Claude settings..."
     python3 << 'EOF'
 import json
 import os
@@ -81,8 +83,9 @@ try:
     with open(settings_path, 'r') as f:
         settings = json.load(f)
 
-    if 'hooks' in settings and 'Stop' in settings['hooks']:
-        del settings['hooks']['Stop']
+    if 'hooks' in settings:
+        for hook_name in ['Stop', 'Notification', 'PostToolUseFailure']:
+            settings['hooks'].pop(hook_name, None)
         # Clean up empty hooks object
         if not settings['hooks']:
             del settings['hooks']
@@ -90,7 +93,7 @@ try:
     with open(settings_path, 'w') as f:
         json.dump(settings, f, indent=2)
 
-    print("Removed Stop hook from settings.json")
+    print("Removed Claude Voice hooks from settings.json")
 except Exception as e:
     print(f"Warning: Could not update settings.json: {e}")
 EOF
@@ -133,6 +136,9 @@ if [ "$KEEP_CONFIG" = true ]; then
     rm -rf "$INSTALL_DIR/logs"
     rm -f "$INSTALL_DIR/daemon.pid"
     rm -f "$INSTALL_DIR/.silent"
+    rm -f "$INSTALL_DIR/.mode"
+    rm -f "$INSTALL_DIR/.error_pending"
+    rm -rf "$INSTALL_DIR/notify_cache"
     rm -f "$INSTALL_DIR/.tts.sock"
     rm -f "$INSTALL_DIR/claude-voice-daemon"
     rm -f "$INSTALL_DIR/config.yaml.example"
