@@ -22,3 +22,6 @@ faster-whisper>=0.10.0
 
 # For Apple Silicon (faster, install separately):
 # pip install mlx-whisper
+
+# AFK mode (Telegram)
+requests>=2.28.0
