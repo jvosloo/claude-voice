@@ -300,13 +300,7 @@ class VoiceDaemon:
         self.hotkey_listener.stop()
         self.recorder.shutdown()
 
-        # Stop Cocoa run loop if running
-        try:
-            from AppKit import NSApplication
-            app = NSApplication.sharedApplication()
-            app.stop_(None)
-        except Exception:
-            pass
+        # Cocoa run loop exits via self._shutting_down flag
 
         # Kill the multiprocessing resource_tracker to prevent semaphore warnings
         # It's a separate subprocess that prints warnings after we exit
@@ -406,13 +400,18 @@ class VoiceDaemon:
 
         if overlay_cfg.enabled:
             # Run Cocoa run loop on main thread (required for NSWindow)
-            from AppKit import NSApplication
+            # Manual run loop instead of NSApplication.run() because the
+            # latter overrides Python's SIGINT handler, breaking Ctrl+C.
+            from AppKit import NSApplication, NSDate
+            from Foundation import NSRunLoop
             app = NSApplication.sharedApplication()
             app.setActivationPolicy_(1)  # NSApplicationActivationPolicyAccessory
-            try:
-                app.run()
-            except KeyboardInterrupt:
-                self._shutdown()
+            app.finishLaunching()
+            run_loop = NSRunLoop.currentRunLoop()
+            while not self._shutting_down:
+                run_loop.runUntilDate_(
+                    NSDate.dateWithTimeIntervalSinceNow_(0.2)
+                )
         else:
             # No overlay — block on hotkey listener as before
             try:
