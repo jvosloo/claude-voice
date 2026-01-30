@@ -48,11 +48,18 @@ class AudioConfig:
     sample_rate: int = 16000
 
 @dataclass
+class OverlayConfig:
+    enabled: bool = True
+    recording_color: str = "#34C759"
+    transcribing_color: str = "#A855F7"
+
+@dataclass
 class Config:
     input: InputConfig
     transcription: TranscriptionConfig
     speech: SpeechConfig
     audio: AudioConfig
+    overlay: OverlayConfig
 
 def load_config() -> Config:
     """Load configuration from YAML file, with defaults for missing values."""
@@ -71,4 +78,5 @@ def load_config() -> Config:
         transcription=TranscriptionConfig(**data.get('transcription', {})),
         speech=SpeechConfig(**speech_data),
         audio=AudioConfig(**data.get('audio', {})),
+        overlay=OverlayConfig(**data.get('overlay', {})),
     )
