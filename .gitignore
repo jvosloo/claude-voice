@@ -29,5 +29,8 @@ notify_cache/
 *.iml
 .vscode/
 
+# Worktrees
+.worktrees/
+
 # Local config (use config.yaml.example as template)
 config.yaml
