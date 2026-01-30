@@ -2,7 +2,7 @@
 
 import os
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
@@ -10,6 +10,7 @@ CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
 @dataclass
 class InputConfig:
     hotkey: str = "right_alt"
+    language_hotkey: Optional[str] = None
     auto_submit: bool = False
     min_audio_length: float = 0.5
     typing_delay: float = 0.01
@@ -23,6 +24,7 @@ class TranscriptionConfig:
     language: str = "en"
     device: str = "cpu"
     backend: str = "faster-whisper"  # "faster-whisper" or "mlx"
+    extra_languages: list = field(default_factory=list)
 
 DEFAULT_NOTIFY_PHRASES = {
     "permission": "Permission needed",

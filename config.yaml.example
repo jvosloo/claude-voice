@@ -2,6 +2,7 @@
 
 input:
   hotkey: "right_alt"          # Key to hold for recording
+  language_hotkey: null         # Key to cycle languages (e.g. "right_cmd")
   auto_submit: false           # Press Enter after transcription
   min_audio_length: 0.5        # Ignore recordings shorter than this (seconds)
   typing_delay: 0.01           # Delay between keystrokes (seconds)
@@ -13,6 +14,7 @@ transcription:
   language: "en"
   device: "cpu"                # cpu or cuda (for faster-whisper)
   backend: "mlx"               # "faster-whisper" or "mlx" (mlx is faster on Apple Silicon)
+  extra_languages: []            # Additional languages to cycle through (e.g. ["af", "de"])
 
 speech:
   enabled: true                # Set to false to disable TTS output

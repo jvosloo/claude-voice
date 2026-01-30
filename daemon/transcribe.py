@@ -43,12 +43,13 @@ class Transcriber:
                     )
         return self._model
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "en") -> str:
         """Transcribe audio to text.
 
         Args:
             audio: Audio data as float32 numpy array
             sample_rate: Sample rate (must be 16000 for Whisper)
+            language: Language code for transcription (e.g. "en", "af", "de")
 
         Returns:
             Transcribed text string
@@ -63,11 +64,11 @@ class Transcriber:
             audio = audio.astype(np.float32)
 
         if self.backend == "mlx":
-            return self._transcribe_mlx(audio)
+            return self._transcribe_mlx(audio, language=language)
         else:
-            return self._transcribe_faster_whisper(audio)
+            return self._transcribe_faster_whisper(audio, language=language)
 
-    def _transcribe_mlx(self, audio: np.ndarray) -> str:
+    def _transcribe_mlx(self, audio: np.ndarray, language: str = "en") -> str:
         """Transcribe using MLX Whisper."""
         import mlx_whisper
 
@@ -77,16 +78,16 @@ class Transcriber:
         result = mlx_whisper.transcribe(
             audio,
             path_or_hf_repo=mlx_model,
-            language="en",
+            language=language,
         )
 
         return result.get("text", "").strip()
 
-    def _transcribe_faster_whisper(self, audio: np.ndarray) -> str:
+    def _transcribe_faster_whisper(self, audio: np.ndarray, language: str = "en") -> str:
         """Transcribe using faster-whisper."""
         segments, info = self._model.transcribe(
             audio,
-            language="en",
+            language=language,
             vad_filter=True,
         )
 

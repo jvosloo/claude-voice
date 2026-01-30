@@ -113,10 +113,18 @@ class VoiceDaemon:
             auto_submit=self.config.input.auto_submit,
         )
 
+        # Build language cycle list
+        self._languages = [self.config.transcription.language]
+        if self.config.transcription.extra_languages:
+            self._languages += self.config.transcription.extra_languages
+
         self.hotkey_listener = HotkeyListener(
             hotkey=self.config.input.hotkey,
             on_press=self._on_hotkey_press,
             on_release=self._on_hotkey_release,
+            language_hotkey=self.config.input.language_hotkey,
+            languages=self._languages,
+            on_language_change=self._on_language_change,
         )
 
         self.tts_engine = TTSEngine()
@@ -132,6 +140,13 @@ class VoiceDaemon:
                 debug=self.config.input.debug,
             )
 
+    def _on_language_change(self, lang: str) -> None:
+        """Called when language is cycled."""
+        code = lang.upper()
+        print(f"Language: {code}")
+        from daemon import overlay
+        overlay.show_language_flash(code)
+
     def _on_hotkey_press(self) -> None:
         """Called when hotkey is pressed - start recording."""
         # Start recording FIRST - minimize latency
@@ -139,9 +154,13 @@ class VoiceDaemon:
         # Play ascending cue to signal recording started
         _play_cue([440, 880])
         print("Recording...")
+        # Show language label on overlay if not default language
+        lang = self.hotkey_listener.active_language
+        default_lang = self._languages[0]
+        label = lang.upper() if lang != default_lang else None
         # Show overlay
         from daemon import overlay
-        overlay.show_recording()
+        overlay.show_recording(label=label)
         # Stop any TTS playback
         self._interrupted_tts = self.tts_engine.stop_playback()
         if not self._interrupted_tts:
@@ -254,7 +273,7 @@ class VoiceDaemon:
 
         overlay.show_transcribing()
         print(f"Transcribing {duration:.1f}s of audio...")
-        text = self.transcriber.transcribe(audio)
+        text = self.transcriber.transcribe(audio, language=self.hotkey_listener.active_language)
 
         if not text:
             overlay.hide()
@@ -326,7 +345,15 @@ class VoiceDaemon:
         print("Claude Voice Daemon")
         print("=" * 50)
         print(f"Hotkey: {self.config.input.hotkey} (hold to record)")
+        if self.config.input.language_hotkey and self.config.transcription.extra_languages:
+            print(f"Language hotkey: {self.config.input.language_hotkey} (cycle languages)")
+            print(f"Languages: {', '.join(self._languages)}")
         print(f"Model: {self.config.transcription.model}")
+        if self.config.transcription.extra_languages:
+            model = self.config.transcription.model
+            if model.endswith(".en"):
+                print(f"WARNING: Model '{model}' only supports English.")
+                print(f"  Extra languages {self.config.transcription.extra_languages} require a multilingual model (e.g. large-v3).")
         print("Press Ctrl+C to stop")
         print("=" * 50)
 

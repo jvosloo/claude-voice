@@ -89,6 +89,22 @@ When the focused application is Claude Code:
 - Claude's response is spoken aloud via TTS
 - **Press the hotkey to interrupt** Claude while speaking
 
+### Multilingual Dictation
+
+Switch between languages on the fly with a hotkey. Configure `language_hotkey` and `extra_languages` in your config:
+
+```yaml
+input:
+  language_hotkey: "right_cmd"
+
+transcription:
+  language: "en"
+  extra_languages: ["af"]
+```
+
+- Tap the language hotkey to cycle languages — the overlay flashes the active language code (e.g. "AF")
+- Hold the recording hotkey to dictate in the active language — the overlay pill shows the language code when not using the default
+
 ### Voice Commands
 
 Say these phrases to toggle voice output without leaving Claude:
@@ -155,7 +171,8 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 |---------|---------|-------------|
 | `backend` | `mlx` | `mlx` (fast on Apple Silicon) or `faster-whisper` (CPU) |
 | `model` | `large-v3` | Whisper model (see table below) |
-| `language` | `en` | Language code |
+| `language` | `en` | Default language code |
+| `extra_languages` | `[]` | Additional languages to cycle through (e.g. `["af", "de"]`) |
 | `device` | `cpu` | Compute device for faster-whisper: `cpu` or `cuda` |
 
 **Available models:**
@@ -170,11 +187,14 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 
 **Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast.
 
+**Note:** The `.en` models (e.g. `base.en`) only support English. To use `extra_languages`, you need a multilingual model like `large-v3`.
+
 ### Input Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `hotkey` | `right_alt` | Key to hold for recording |
+| `language_hotkey` | `null` | Key to cycle transcription languages (e.g. `right_cmd`) |
 | `auto_submit` | `false` | Press Enter automatically after transcription |
 | `min_audio_length` | `0.5` | Ignore recordings shorter than this (seconds) |
 | `typing_delay` | `0.01` | Delay between keystrokes (seconds) |

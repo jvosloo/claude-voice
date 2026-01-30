@@ -73,8 +73,9 @@ if PYOBJC_AVAILABLE:
             self._bg_color = None  # None = transparent (frosted/dark handled elsewhere or inline)
             self._fg_color = NSColor.whiteColor()
             self._style = "dark"
-            self._mode = "idle"  # idle, recording, transcribing
+            self._mode = "idle"  # idle, recording, transcribing, language_flash
             self._phase = 0.0
+            self._label = None  # e.g. "AF"
             return self
 
         def setStyle_(self, style):
@@ -94,6 +95,10 @@ if PYOBJC_AVAILABLE:
 
         def setPhase_(self, phase):
             self._phase = phase
+            self.setNeedsDisplay_(True)
+
+        def setLabel_(self, label):
+            self._label = label
             self.setNeedsDisplay_(True)
 
         def drawRect_(self, rect):
@@ -128,8 +133,12 @@ if PYOBJC_AVAILABLE:
             # Draw animated content
             if self._mode == "recording":
                 self._draw_waveform(bounds)
+                if self._label:
+                    self._draw_label(bounds, large=False)
             elif self._mode == "transcribing":
                 self._draw_dots(bounds)
+            elif self._mode == "language_flash":
+                self._draw_label(bounds, large=True)
 
         def _draw_waveform(self, bounds):
             """Draw animated waveform bars."""
@@ -182,6 +191,24 @@ if PYOBJC_AVAILABLE:
                 )
                 dot.fill()
 
+        def _draw_label(self, bounds, large=False):
+            """Draw language code text centered in the pill."""
+            from AppKit import NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSString
+            text = NSString.stringWithString_(self._label)
+            font_size = 18.0 if large else 11.0
+            font = NSFont.boldSystemFontOfSize_(font_size)
+            attrs = {
+                NSFontAttributeName: font,
+                NSForegroundColorAttributeName: self._fg_color.colorWithAlphaComponent_(0.95),
+            }
+            text_size = text.sizeWithAttributes_(attrs)
+            if large:
+                x = (bounds.size.width - text_size.width) / 2
+            else:
+                x = bounds.size.width - text_size.width - 10
+            y = (bounds.size.height - text_size.height) / 2
+            text.drawAtPoint_withAttributes_((x, y), attrs)
+
     class OverlayController(NSObject):
         """Controls the floating overlay window. All public methods are thread-safe."""
 
@@ -193,10 +220,11 @@ if PYOBJC_AVAILABLE:
             self._pill_view = None
             self._anim_timer = None
             self._anim_phase = 0.0
-            self._state = "idle"  # idle, recording, transcribing
+            self._state = "idle"  # idle, recording, transcribing, language_flash
             self._style = "dark"
             self._recording_color = None
             self._transcribing_color = None
+            self._fade_timer = None
             return self
 
         def setStyle_(self, style):
@@ -269,12 +297,12 @@ if PYOBJC_AVAILABLE:
             # dark / frosted recording: use the recording color as foreground
             return self._recording_color
 
-        def show_recording(self):
+        def show_recording(self, label=None):
             """Show pill with waveform animation. Thread-safe."""
             if self._window is None:
                 return
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "doShowRecording", None, False
+                "doShowRecording:", label, False
             )
 
         def show_transcribing(self):
@@ -293,10 +321,12 @@ if PYOBJC_AVAILABLE:
                 "doHide", None, False
             )
 
-        def doShowRecording(self):
+        def doShowRecording_(self, label):
             """Main thread: show pill with waveform bars."""
             self._stop_anim()
+            self._cancel_fade()
             self._state = "recording"
+            self._pill_view.setLabel_(label)
             self._pill_view.setBackgroundColor_(self._recording_color)
             self._pill_view.setForegroundColor_(self._fg_color_for_state("recording"))
             self._pill_view.setMode_("recording")
@@ -306,7 +336,9 @@ if PYOBJC_AVAILABLE:
         def doShowTranscribing(self):
             """Main thread: show pill with bouncing dots."""
             self._stop_anim()
+            self._cancel_fade()
             self._state = "transcribing"
+            self._pill_view.setLabel_(None)
             self._pill_view.setBackgroundColor_(self._transcribing_color)
             self._pill_view.setForegroundColor_(
                 self._fg_color_for_state("transcribing")
@@ -317,9 +349,45 @@ if PYOBJC_AVAILABLE:
         def doHide(self):
             """Main thread: hide the pill."""
             self._stop_anim()
+            self._cancel_fade()
             self._state = "idle"
+            self._pill_view.setLabel_(None)
             self._pill_view.setMode_("idle")
             self._window.setAlphaValue_(0.0)
+
+        def show_language_flash(self, lang_code):
+            """Flash the pill with a language code. Thread-safe."""
+            if self._window is None:
+                return
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "doShowLanguageFlash:", lang_code.upper(), False
+            )
+
+        def doShowLanguageFlash_(self, lang_code):
+            """Main thread: show pill with language code, auto-fade after 1.5s."""
+            self._stop_anim()
+            self._cancel_fade()
+            self._state = "language_flash"
+            self._pill_view.setLabel_(lang_code)
+            self._pill_view.setForegroundColor_(NSColor.whiteColor())
+            self._pill_view.setMode_("language_flash")
+            self._window.setAlphaValue_(1.0)
+            self._fade_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                1.5, self, "fadeOut:", None, False
+            )
+
+        def fadeOut_(self, timer):
+            """Timer callback: hide the pill after language flash."""
+            self._fade_timer = None
+            self._pill_view.setLabel_(None)
+            self._pill_view.setMode_("idle")
+            self._window.setAlphaValue_(0.0)
+
+        def _cancel_fade(self):
+            """Cancel any pending fade timer."""
+            if self._fade_timer:
+                self._fade_timer.invalidate()
+                self._fade_timer = None
 
         def _start_anim(self):
             """Start the animation timer."""
@@ -363,9 +431,14 @@ def init(
     _controller.setup()
 
 
-def show_recording():
+def show_recording(label=None):
     if _controller:
-        _controller.show_recording()
+        _controller.show_recording(label=label)
+
+
+def show_language_flash(lang_code):
+    if _controller:
+        _controller.show_language_flash(lang_code)
 
 
 def show_transcribing():

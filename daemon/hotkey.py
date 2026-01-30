@@ -19,19 +19,32 @@ KEY_MAP = {
 }
 
 class HotkeyListener:
-    """Listens for push-to-talk hotkey."""
+    """Listens for push-to-talk hotkey and optional language cycle hotkey."""
 
     def __init__(
         self,
         hotkey: str,
         on_press: Callable[[], None],
         on_release: Callable[[], None],
+        language_hotkey: Optional[str] = None,
+        languages: Optional[list[str]] = None,
+        on_language_change: Optional[Callable[[str], None]] = None,
     ):
         self.hotkey = KEY_MAP.get(hotkey, keyboard.Key.alt_r)
         self.on_press = on_press
         self.on_release = on_release
         self._listener: Optional[keyboard.Listener] = None
         self._pressed = False
+
+        # Language cycling
+        self._language_hotkey = KEY_MAP.get(language_hotkey) if language_hotkey else None
+        self._languages = languages or ["en"]
+        self._language_index = 0
+        self._on_language_change = on_language_change
+
+    @property
+    def active_language(self) -> str:
+        return self._languages[self._language_index]
 
     def _handle_press(self, key) -> None:
         """Handle key press event."""
@@ -44,6 +57,14 @@ class HotkeyListener:
         if key == self.hotkey and self._pressed:
             self._pressed = False
             self.on_release()
+        elif key == self._language_hotkey and self._language_hotkey is not None:
+            self._cycle_language()
+
+    def _cycle_language(self) -> None:
+        self._language_index = (self._language_index + 1) % len(self._languages)
+        lang = self._languages[self._language_index]
+        if self._on_language_change:
+            self._on_language_change(lang)
 
     def start(self) -> None:
         """Start listening for hotkey."""
