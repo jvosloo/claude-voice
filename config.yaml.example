@@ -35,5 +35,6 @@ audio:
 
 overlay:
   enabled: true                # Show visual indicator during recording/transcription
-  recording_color: "#34C759"   # Green pill while recording
-  transcribing_color: "#A855F7" # Purple pulsing pill while transcribing
+  style: "dark"                # "dark" = dark HUD, "frosted" = blur glass, "colored" = solid color pills
+  recording_color: "#34C759"   # Green (bars on dark/frosted, background on colored)
+  transcribing_color: "#A855F7" # Purple (dots on dark/frosted, background on colored)

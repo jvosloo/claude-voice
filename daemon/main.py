@@ -396,6 +396,7 @@ class VoiceDaemon:
             overlay.init(
                 recording_color=overlay_cfg.recording_color,
                 transcribing_color=overlay_cfg.transcribing_color,
+                style=overlay_cfg.style,
             )
 
         # Start hotkey listener on background thread

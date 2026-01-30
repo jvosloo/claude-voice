@@ -7,6 +7,7 @@ try:
     from AppKit import (
         NSWindow,
         NSView,
+        NSVisualEffectView,
         NSColor,
         NSScreen,
         NSBezierPath,
@@ -35,6 +36,9 @@ PILL_WIDTH = 120
 PILL_HEIGHT = 36
 PILL_RADIUS = PILL_HEIGHT / 2
 MARGIN_TOP = 10  # below menu bar
+
+# Dark style background
+DARK_BG = (0.0, 0.0, 0.0, 0.7)
 
 # Animation
 ANIM_INTERVAL = 0.03  # ~30fps
@@ -66,11 +70,15 @@ if PYOBJC_AVAILABLE:
             self = objc.super(_PillView, self).initWithFrame_(frame)
             if self is None:
                 return None
-            self._bg_color = NSColor.greenColor()
+            self._bg_color = None  # None = transparent (frosted/dark handled elsewhere or inline)
             self._fg_color = NSColor.whiteColor()
+            self._style = "dark"
             self._mode = "idle"  # idle, recording, transcribing
             self._phase = 0.0
             return self
+
+        def setStyle_(self, style):
+            self._style = style
 
         def setBackgroundColor_(self, color):
             self._bg_color = color
@@ -94,14 +102,26 @@ if PYOBJC_AVAILABLE:
                 bounds, PILL_RADIUS, PILL_RADIUS
             )
 
-            # Background fill
-            self._bg_color.colorWithAlphaComponent_(0.92).setFill()
-            pill.fill()
+            # Background fill depends on style
+            if self._style == "colored" and self._bg_color:
+                self._bg_color.colorWithAlphaComponent_(0.92).setFill()
+                pill.fill()
+            elif self._style == "dark":
+                NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                    *DARK_BG
+                ).setFill()
+                pill.fill()
+            # "frosted" style: background handled by NSVisualEffectView, skip fill
 
             # Subtle border
-            NSColor.colorWithCalibratedRed_green_blue_alpha_(
-                0, 0, 0, 0.15
-            ).setStroke()
+            if self._style == "dark":
+                NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                    1, 1, 1, 0.08
+                ).setStroke()
+            else:
+                NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                    0, 0, 0, 0.15
+                ).setStroke()
             pill.setLineWidth_(0.5)
             pill.stroke()
 
@@ -120,10 +140,8 @@ if PYOBJC_AVAILABLE:
             self._fg_color.colorWithAlphaComponent_(0.95).setFill()
 
             for i in range(NUM_BARS):
-                # Each bar has its own sine frequency for organic movement
                 speed = BAR_SPEEDS[i]
                 wave = math.sin(self._phase * speed * 2 * math.pi)
-                # Map sine (-1..1) to bar height range
                 h = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * (wave + 1) / 2
 
                 x = start_x + i * (BAR_WIDTH + BAR_GAP)
@@ -143,22 +161,16 @@ if PYOBJC_AVAILABLE:
             base_y = bounds.size.height / 2
 
             for i in range(NUM_DOTS):
-                # Stagger each dot's phase
                 dot_phase = self._phase - i * DOT_STAGGER / DOT_CYCLE
-                # Normalize to 0..1 cycle
                 t = dot_phase % 1.0
-                # Smooth bounce: use sine for up, quick return down
                 if t < 0.4:
-                    # Going up and down (bounce portion)
                     bounce = math.sin(t / 0.4 * math.pi) * DOT_BOUNCE
                 else:
-                    # Resting
                     bounce = 0.0
 
                 cx = start_x + DOT_RADIUS + i * (DOT_RADIUS * 2 + DOT_GAP)
                 cy = base_y + bounce
 
-                # Dot alpha: slightly dim when resting
                 alpha = 0.95 if t < 0.4 else 0.5
                 self._fg_color.colorWithAlphaComponent_(alpha).setFill()
 
@@ -182,9 +194,13 @@ if PYOBJC_AVAILABLE:
             self._anim_timer = None
             self._anim_phase = 0.0
             self._state = "idle"  # idle, recording, transcribing
+            self._style = "dark"
             self._recording_color = None
             self._transcribing_color = None
             return self
+
+        def setStyle_(self, style):
+            self._style = style
 
         def setColors_transcribing_(self, recording_color, transcribing_color):
             self._recording_color = recording_color
@@ -223,11 +239,37 @@ if PYOBJC_AVAILABLE:
             self._window.setHasShadow_(True)
             self._window.setAlphaValue_(0.0)
 
+            content = self._window.contentView()
             pill_rect = NSMakeRect(0, 0, PILL_WIDTH, PILL_HEIGHT)
+
+            # Frosted style: add NSVisualEffectView as background layer
+            if self._style == "frosted":
+                effect_view = NSVisualEffectView.alloc().initWithFrame_(pill_rect)
+                # NSVisualEffectMaterialHUDWindow = 13
+                effect_view.setMaterial_(13)
+                # NSVisualEffectBlendingModeBehindWindow = 0
+                effect_view.setBlendingMode_(0)
+                # NSVisualEffectStateActive = 1
+                effect_view.setState_(1)
+                effect_view.setWantsLayer_(True)
+                effect_view.layer().setCornerRadius_(PILL_RADIUS)
+                effect_view.layer().setMasksToBounds_(True)
+                content.addSubview_(effect_view)
+
             self._pill_view = _PillView.alloc().initWithFrame_(pill_rect)
-            self._window.contentView().addSubview_(self._pill_view)
+            self._pill_view.setStyle_(self._style)
+            content.addSubview_(self._pill_view)
 
             self._window.orderFrontRegardless()
+
+        def _fg_color_for_state(self, state):
+            """Return the foreground color based on style and state."""
+            if self._style == "colored":
+                return NSColor.whiteColor()
+            # dark / frosted: use the state color as foreground
+            if state == "recording":
+                return self._recording_color
+            return self._transcribing_color
 
         def show_recording(self):
             """Show pill with waveform animation. Thread-safe."""
@@ -254,24 +296,22 @@ if PYOBJC_AVAILABLE:
             )
 
         def doShowRecording(self):
-            """Main thread: show green pill with waveform bars."""
+            """Main thread: show pill with waveform bars."""
             self._stop_anim()
             self._state = "recording"
             self._pill_view.setBackgroundColor_(self._recording_color)
-            self._pill_view.setForegroundColor_(
-                NSColor.whiteColor()
-            )
+            self._pill_view.setForegroundColor_(self._fg_color_for_state("recording"))
             self._pill_view.setMode_("recording")
             self._window.setAlphaValue_(1.0)
             self._start_anim()
 
         def doShowTranscribing(self):
-            """Main thread: show purple pill with bouncing dots."""
+            """Main thread: show pill with bouncing dots."""
             self._stop_anim()
             self._state = "transcribing"
             self._pill_view.setBackgroundColor_(self._transcribing_color)
             self._pill_view.setForegroundColor_(
-                NSColor.whiteColor()
+                self._fg_color_for_state("transcribing")
             )
             self._pill_view.setMode_("transcribing")
             self._start_anim()
@@ -306,13 +346,18 @@ if PYOBJC_AVAILABLE:
 _controller: "OverlayController | None" = None
 
 
-def init(recording_color: str = "#34C759", transcribing_color: str = "#A855F7"):
+def init(
+    recording_color: str = "#34C759",
+    transcribing_color: str = "#A855F7",
+    style: str = "dark",
+):
     """Initialize the overlay. Must be called on the main thread."""
     global _controller
     if not PYOBJC_AVAILABLE:
         print("Warning: PyObjC not available, overlay disabled")
         return
     _controller = OverlayController.alloc().init()
+    _controller.setStyle_(style)
     _controller.setColors_transcribing_(
         _hex_to_nscolor(recording_color),
         _hex_to_nscolor(transcribing_color),
