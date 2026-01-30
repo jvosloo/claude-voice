@@ -69,10 +69,9 @@ if [ -f "$CLAUDE_HOOKS_DIR/speak-response.py" ]; then
     rm -f "$CLAUDE_HOOKS_DIR/speak-response.py"
 fi
 rm -f "$CLAUDE_HOOKS_DIR/notify-permission.py"
-rm -f "$CLAUDE_HOOKS_DIR/notify-error.py"
 
 # Remove hooks from settings.json
-if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"Stop"\|"Notification"\|"PostToolUseFailure"' "$CLAUDE_SETTINGS"; then
+if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"Stop"\|"Notification"' "$CLAUDE_SETTINGS"; then
     echo "Removing Claude Voice hooks from Claude settings..."
     python3 << 'EOF'
 import json
@@ -84,7 +83,7 @@ try:
         settings = json.load(f)
 
     if 'hooks' in settings:
-        for hook_name in ['Stop', 'Notification', 'PostToolUseFailure']:
+        for hook_name in ['Stop', 'Notification']:
             settings['hooks'].pop(hook_name, None)
         # Clean up empty hooks object
         if not settings['hooks']:
@@ -137,7 +136,6 @@ if [ "$KEEP_CONFIG" = true ]; then
     rm -f "$INSTALL_DIR/daemon.pid"
     rm -f "$INSTALL_DIR/.silent"
     rm -f "$INSTALL_DIR/.mode"
-    rm -f "$INSTALL_DIR/.error_pending"
     rm -rf "$INSTALL_DIR/notify_cache"
     rm -f "$INSTALL_DIR/.tts.sock"
     rm -f "$INSTALL_DIR/claude-voice-daemon"

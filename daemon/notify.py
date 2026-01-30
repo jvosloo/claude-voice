@@ -5,26 +5,11 @@ import subprocess
 
 # Categories
 PERMISSION = "permission"
-ERROR = "error"
 DONE = "done"
-
-# Flag file written by the PostToolUseFailure hook (notify-error.py)
-ERROR_FLAG = os.path.expanduser("~/.claude-voice/.error_pending")
-
-
-def _check_and_clear_error_flag() -> bool:
-    """Check if the error flag file exists and remove it. Returns True if it was present."""
-    try:
-        os.remove(ERROR_FLAG)
-        return True
-    except FileNotFoundError:
-        return False
 
 
 def classify(text: str) -> str:
-    """Classify a Claude response. Returns 'error' or 'done'."""
-    if _check_and_clear_error_flag():
-        return ERROR
+    """Classify a Claude response."""
     return DONE
 
 

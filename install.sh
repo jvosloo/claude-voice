@@ -296,10 +296,8 @@ fi
 echo "Installing Claude Code hooks..."
 cp "$SCRIPT_DIR/hooks/speak-response.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/notify-permission.py" "$CLAUDE_HOOKS_DIR/"
-cp "$SCRIPT_DIR/hooks/notify-error.py" "$CLAUDE_HOOKS_DIR/"
 chmod +x "$CLAUDE_HOOKS_DIR/speak-response.py"
 chmod +x "$CLAUDE_HOOKS_DIR/notify-permission.py"
-chmod +x "$CLAUDE_HOOKS_DIR/notify-error.py"
 
 # Update Claude settings for hook
 echo "Configuring Claude Code settings..."
@@ -336,18 +334,10 @@ settings['hooks']['Notification'] = [{
     }]
 }]
 
-settings['hooks']['PostToolUseFailure'] = [{
-    "matcher": "Bash",
-    "hooks": [{
-        "type": "command",
-        "command": "~/.claude/hooks/notify-error.py"
-    }]
-}]
-
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
 
-print("Added Stop, Notification, and PostToolUseFailure hooks to settings.json")
+print("Added Stop and Notification hooks to settings.json")
 EOF
     fi
 else
@@ -376,22 +366,11 @@ else
           }
         ]
       }
-    ],
-    "PostToolUseFailure": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/notify-error.py"
-          }
-        ]
-      }
     ]
   }
 }
 EOF
-    echo "Created settings.json with Stop, Notification, and PostToolUseFailure hooks"
+    echo "Created settings.json with Stop and Notification hooks"
 fi
 
 # macOS permissions check

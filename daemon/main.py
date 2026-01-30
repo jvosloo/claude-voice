@@ -35,7 +35,7 @@ from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
 from daemon.cleanup import TranscriptionCleaner
 from daemon.tts import TTSEngine
-from daemon.notify import classify, play_phrase, stop_playback as stop_notify_playback, ERROR_FLAG
+from daemon.notify import classify, play_phrase, stop_playback as stop_notify_playback
 
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
@@ -361,10 +361,6 @@ class VoiceDaemon:
         if not os.path.exists(MODE_FILE):
             _write_mode(self.config.speech.mode)
         print(f"TTS mode: {_read_mode()}")
-
-        # Clean up stale error flag from previous session
-        if os.path.exists(ERROR_FLAG):
-            os.remove(ERROR_FLAG)
 
         # Pre-load models
         self.transcriber._ensure_model()

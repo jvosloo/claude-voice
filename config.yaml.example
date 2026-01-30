@@ -23,7 +23,6 @@ speech:
   # notify_phrases:              # Customize status phrases (remove or match default to use shipped audio)
   #   permission: "Permission needed"
   #   done: "Ready for input"
-  #   error: "Something failed"
   voice: "af_heart"            # Kokoro voice ID (see README for full list)
   speed: 1.0                   # Playback speed (1.0 = normal)
   lang_code: "a"               # Language: a=American, b=British, j=Japanese, z=Chinese, e=Spanish, f=French

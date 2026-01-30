@@ -3,7 +3,7 @@
 Push-to-talk voice input for macOS. Transcribes speech and types it into any focused application.
 
 When used with Claude Code, two voice output modes are available:
-- **Notify mode** (default) — plays short status phrases ("Ready for input", "Something failed", "Permission needed")
+- **Notify mode** (default) — plays short status phrases ("Ready for input", "Permission needed")
 - **Narrate mode** — reads Claude's full response aloud via neural TTS
 
 **Platform:** macOS (uses `afplay` for audio playback)
@@ -253,8 +253,7 @@ Full voice list: https://huggingface.co/mlx-community/Kokoro-82M-bf16/blob/main/
 ### Voice Output (Hooks + Daemon)
 - `~/.claude/hooks/speak-response.py` - Stop hook: sends response text to daemon
 - `~/.claude/hooks/notify-permission.py` - Notification hook: signals permission prompts
-- `~/.claude/hooks/notify-error.py` - PostToolUseFailure hook: signals Bash errors
-- `~/.claude/settings.json` - Hook configuration (Stop, Notification, PostToolUseFailure)
+- `~/.claude/settings.json` - Hook configuration (Stop, Notification)
 - `~/.claude-voice/.tts.sock` - Unix socket for hook-to-daemon TTS communication (runtime)
 - Kokoro TTS model cached at `~/.cache/huggingface/hub/models--mlx-community--Kokoro-82M-bf16/`
 

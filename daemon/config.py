@@ -29,7 +29,6 @@ class TranscriptionConfig:
 DEFAULT_NOTIFY_PHRASES = {
     "permission": "Permission needed",
     "done": "Ready for input",
-    "error": "Something failed",
 }
 
 @dataclass
