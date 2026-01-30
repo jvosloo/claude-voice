@@ -323,8 +323,10 @@ class VoiceDaemon:
 
     def run(self) -> None:
         """Start the daemon."""
-        # Handle SIGTERM (from kill command) gracefully
+        # Handle SIGTERM (from kill command) and SIGINT (Ctrl+C) gracefully
+        # SIGINT must be explicit because NSApplication.run() swallows KeyboardInterrupt
         signal.signal(signal.SIGTERM, lambda sig, frame: self._shutdown())
+        signal.signal(signal.SIGINT, lambda sig, frame: self._shutdown())
 
         print("=" * 50)
         print("Claude Voice Daemon")
