@@ -264,12 +264,10 @@ if PYOBJC_AVAILABLE:
 
         def _fg_color_for_state(self, state):
             """Return the foreground color based on style and state."""
-            if self._style == "colored":
+            if self._style == "colored" or state == "transcribing":
                 return NSColor.whiteColor()
-            # dark / frosted: use the state color as foreground
-            if state == "recording":
-                return self._recording_color
-            return self._transcribing_color
+            # dark / frosted recording: use the recording color as foreground
+            return self._recording_color
 
         def show_recording(self):
             """Show pill with waveform animation. Thread-safe."""
