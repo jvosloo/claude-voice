@@ -45,5 +45,4 @@ overlay:
 #   telegram:
 #     bot_token: ""       # Create bot via @BotFather on Telegram
 #     chat_id: ""         # Your Telegram chat ID (message @userinfobot)
-#   hotkey: "right_alt+a"  # Toggle AFK mode
-#   context_lines: 10      # Lines of Claude output to include in messages
+#   hotkey: "left_alt+a"   # Toggle AFK mode

@@ -59,6 +59,18 @@ class TelegramClient:
         except Exception:
             pass
 
+    def delete_message(self, message_id: int) -> bool:
+        """Delete a message. Returns True on success."""
+        try:
+            resp = requests.post(
+                f"{self._base_url}/deleteMessage",
+                json={"chat_id": self.chat_id, "message_id": message_id},
+                timeout=5,
+            )
+            return resp.json().get("ok", False)
+        except Exception:
+            return False
+
     def edit_message_reply_markup(self, message_id: int, reply_markup: dict | None = None) -> None:
         """Edit the reply markup of a sent message (e.g., remove buttons after press)."""
         try:
@@ -153,6 +165,20 @@ class TelegramClient:
             text = message.get("text", "")
             if self._message_handler and text:
                 self._message_handler(text)
+
+
+def make_options_keyboard(options: list[dict]) -> dict:
+    """Create an inline keyboard from AskUserQuestion options.
+
+    Each option is {"label": "...", "description": "..."}.
+    Creates one button per row, plus an "Other" button at the end.
+    Callback data is the option label.
+    """
+    rows = []
+    for opt in options:
+        label = opt.get("label", "?")
+        rows.append([{"text": label, "callback_data": f"opt:{label}"}])
+    return {"inline_keyboard": rows}
 
 
 def make_permission_keyboard() -> dict:

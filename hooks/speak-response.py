@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import sys
+import time
 
 # Paths
 TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
@@ -24,10 +25,30 @@ def load_config():
     except Exception:
         return {}
 
+def _wait_for_transcript_flush(transcript_path: str, timeout: float = 2.0) -> None:
+    """Wait for the transcript file to stop growing (flush complete)."""
+    deadline = time.time() + timeout
+    prev_size = -1
+    while time.time() < deadline:
+        try:
+            cur_size = os.path.getsize(transcript_path)
+        except OSError:
+            break
+        if cur_size == prev_size:
+            # File hasn't grown since last check — flush is done
+            break
+        prev_size = cur_size
+        time.sleep(0.15)
+
+
 def extract_last_assistant_message(transcript_path: str) -> str:
     """Extract the last assistant message from transcript."""
     if not os.path.exists(transcript_path):
         return ""
+
+    # The Stop hook can fire before Claude Code flushes the current
+    # response to the transcript.  Wait for the file to stabilise.
+    _wait_for_transcript_flush(transcript_path)
 
     last_message = ""
     with open(transcript_path, 'r') as f:
@@ -97,15 +118,16 @@ def speak(text: str, config: dict) -> None:
     except (ConnectionRefusedError, FileNotFoundError):
         pass  # Daemon not running, silent fail
 
-def send_with_context(text: str, config: dict) -> dict | None:
+def send_with_context(text: str, config: dict, raw_text: str = "") -> dict | None:
     """Send text to daemon with session context. Returns daemon response."""
     if not text:
         return None
 
     session = os.path.basename(os.getcwd())
 
-    # Get last N lines as context
-    context_lines = text.strip().split("\n")[-10:]
+    # Get last N lines as context (from raw text for Telegram)
+    source = raw_text or text
+    context_lines = source.strip().split("\n")[-10:]
     context = "\n".join(context_lines)
 
     try:
@@ -113,11 +135,13 @@ def send_with_context(text: str, config: dict) -> dict | None:
         s.connect(TTS_SOCK_PATH)
         s.sendall(json.dumps({
             "text": text,
+            "raw_text": raw_text,
             "voice": config.get("voice", "af_heart"),
             "speed": config.get("speed", 1.0),
             "lang_code": config.get("lang_code", "a"),
             "session": session,
             "context": context,
+            "type": "context",
         }).encode())
         s.shutdown(socket.SHUT_WR)
         # Read response
@@ -166,11 +190,11 @@ def main():
             return
 
     # Extract and clean the last response
-    text = extract_last_assistant_message(transcript_path)
-    text = clean_text_for_speech(text, config)
+    raw_text = extract_last_assistant_message(transcript_path)
+    text = clean_text_for_speech(raw_text, config)
 
     if text:
-        send_with_context(text, config)
+        send_with_context(text, config, raw_text=raw_text)
 
 if __name__ == "__main__":
     main()

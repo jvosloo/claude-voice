@@ -141,8 +141,8 @@ afk:
 
 | Action | Method |
 |--------|--------|
-| Activate | Say "going AFK" or press Right Alt+A |
-| Deactivate | Say "back at keyboard", press Right Alt+A, or send `/back` in Telegram |
+| Activate | Say "going AFK" or press Left Alt+A |
+| Deactivate | Say "back at keyboard", press Left Alt+A, or send `/back` in Telegram |
 | Check status | Send `/status` in Telegram |
 | Approve permission | Tap Yes / No button |
 | Provide input | Type your reply in the Telegram chat |
@@ -199,7 +199,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `max_chars` | `null` | Limit spoken output length (`null` = unlimited) |
 | `skip_code_blocks` | `true` | Don't speak code blocks |
 | `skip_tool_results` | `true` | Don't speak tool result output |
-| `notify_phrases` | *(defaults)* | Custom phrase overrides per category (permission, done, error) |
+| `notify_phrases` | *(defaults)* | Custom phrase overrides per category (permission, done) |
 
 ### Transcription Settings
 

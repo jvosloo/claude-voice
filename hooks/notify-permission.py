@@ -16,6 +16,7 @@ import time
 TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
 MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
+ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
 
 
@@ -89,6 +90,10 @@ def main():
     if mode != "afk" and os.path.exists(SILENT_FLAG):
         return
 
+    # Skip if AskUserQuestion hook is handling this prompt
+    if os.path.exists(ASK_USER_FLAG):
+        return
+
     # Read hook input
     try:
         hook_input = json.load(sys.stdin)
@@ -114,8 +119,12 @@ def main():
         response_path = response.get("response_path", "")
         if response_path:
             answer = wait_for_response(response_path)
-            if answer and answer.lower() in ("yes", "y"):
-                type_response("y")
+            if answer:
+                answer_lower = answer.lower()
+                if answer_lower in ("yes", "y"):
+                    type_response("y")
+                elif answer_lower in ("no", "n"):
+                    type_response("n")
 
 
 if __name__ == "__main__":

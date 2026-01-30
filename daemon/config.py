@@ -63,10 +63,9 @@ class AfkTelegramConfig:
 @dataclass
 class AfkConfig:
     telegram: AfkTelegramConfig = None
-    hotkey: str = "right_alt+a"
+    hotkey: str = "left_alt+a"
     voice_commands_activate: list = None
     voice_commands_deactivate: list = None
-    context_lines: int = 10
 
     def __post_init__(self):
         if self.telegram is None:

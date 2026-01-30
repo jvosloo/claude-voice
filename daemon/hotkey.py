@@ -4,6 +4,14 @@ from pynput import keyboard
 from typing import Callable, Optional
 import threading
 
+# macOS virtual key codes for letter keys (kVK_ANSI_* from Carbon/HIToolbox)
+_MACOS_CHAR_TO_VK = {
+    'a': 0, 'b': 11, 'c': 8, 'd': 2, 'e': 14, 'f': 3, 'g': 5,
+    'h': 4, 'i': 34, 'j': 38, 'k': 40, 'l': 37, 'm': 46, 'n': 45,
+    'o': 31, 'p': 35, 'q': 12, 'r': 15, 's': 1, 't': 17, 'u': 32,
+    'v': 9, 'w': 13, 'x': 7, 'y': 16, 'z': 6,
+}
+
 # Map config names to pynput keys
 KEY_MAP = {
     "right_alt": keyboard.Key.alt_r,
@@ -19,7 +27,7 @@ KEY_MAP = {
 }
 
 class HotkeyListener:
-    """Listens for push-to-talk hotkey and optional language cycle hotkey."""
+    """Listens for push-to-talk hotkey, optional language cycle, and combo hotkeys."""
 
     def __init__(
         self,
@@ -29,6 +37,8 @@ class HotkeyListener:
         language_hotkey: Optional[str] = None,
         languages: Optional[list[str]] = None,
         on_language_change: Optional[Callable[[str], None]] = None,
+        combo_hotkey: Optional[str] = None,
+        on_combo: Optional[Callable[[], None]] = None,
     ):
         self.hotkey = KEY_MAP.get(hotkey, keyboard.Key.alt_r)
         self.on_press = on_press
@@ -42,18 +52,40 @@ class HotkeyListener:
         self._language_index = 0
         self._on_language_change = on_language_change
 
+        # Combo hotkey (modifier+key, e.g. "left_alt+a")
+        self._combo_modifier = None
+        self._combo_vk = None
+        self._on_combo = on_combo
+        self._pressed_keys = set()
+        if combo_hotkey and "+" in combo_hotkey:
+            parts = combo_hotkey.split("+")
+            if len(parts) == 2:
+                self._combo_modifier = KEY_MAP.get(parts[0])
+                # Use macOS virtual key code so modifier keys (Option/Alt)
+                # changing the character (e.g. a -> å) don't break matching
+                self._combo_vk = _MACOS_CHAR_TO_VK.get(parts[1].lower())
+
     @property
     def active_language(self) -> str:
         return self._languages[self._language_index]
 
     def _handle_press(self, key) -> None:
         """Handle key press event."""
+        self._pressed_keys.add(key)
         if key == self.hotkey and not self._pressed:
             self._pressed = True
             self.on_press()
+        # Combo hotkey detection (match by virtual key code to handle
+        # macOS Option key changing characters, e.g. Option+A -> å)
+        if (self._combo_modifier and self._on_combo
+                and self._combo_modifier in self._pressed_keys):
+            vk = getattr(key, 'vk', None)
+            if vk is not None and vk == self._combo_vk:
+                self._on_combo()
 
     def _handle_release(self, key) -> None:
         """Handle key release event."""
+        self._pressed_keys.discard(key)
         if key == self.hotkey and self._pressed:
             self._pressed = False
             self.on_release()
