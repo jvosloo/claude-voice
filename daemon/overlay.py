@@ -6,7 +6,6 @@ import threading
 try:
     import objc
     from AppKit import (
-        NSApplication,
         NSWindow,
         NSView,
         NSColor,
@@ -15,11 +14,9 @@ try:
         NSBackingStoreBuffered,
         NSShadow,
         NSGraphicsContext,
-        NSCompositingOperationSourceOver,
     )
-    from Foundation import NSRect, NSPoint, NSSize, NSTimer, NSObject, NSMakeRect
+    from Foundation import NSSize, NSTimer, NSObject, NSMakeRect
     from Quartz import (
-        kCGWindowLevelStatusBar,
         CGWindowLevelForKey,
         kCGMaximumWindowLevelKey,
     )
