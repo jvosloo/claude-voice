@@ -12,6 +12,38 @@ INSTALL_DIR="$HOME/.claude-voice"
 CLAUDE_HOOKS_DIR="$HOME/.claude/hooks"
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 
+_spin_run() {
+    # Usage: _spin_run "message" command args...
+    local msg="$1"; shift
+    local frames="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    local log; log=$(mktemp)
+
+    # Run command in background, capture output
+    "$@" >"$log" 2>&1 &
+    local cmd_pid=$!
+
+    # Animate spinner while command runs
+    local i=0
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+        printf "\r\033[K%s %s" "${frames:$((i % ${#frames})):1}" "$msg"
+        sleep 0.08
+        i=$((i + 1))
+    done
+
+    # Get exit code
+    wait "$cmd_pid"
+    local rc=$?
+
+    if [ $rc -eq 0 ]; then
+        printf "\r\033[K%s done.\n" "$msg"
+    else
+        printf "\r\033[K%s FAILED\n" "$msg"
+        cat "$log"
+    fi
+    rm -f "$log"
+    return $rc
+}
+
 # Set up logging - capture all output to log file while still showing on screen
 mkdir -p "$INSTALL_DIR/logs"
 LOG_FILE="$INSTALL_DIR/logs/install-$(date +%Y%m%d-%H%M%S).log"
@@ -41,6 +73,26 @@ if [[ "$(uname)" != "Darwin" ]]; then
     echo "Warning: This tool is designed for macOS. TTS playback uses afplay."
     echo "On other platforms, you may need to modify hooks/speak-response.py"
     echo ""
+fi
+
+# Check for ffmpeg (required by mlx-audio's av dependency)
+if ! command -v ffmpeg &>/dev/null; then
+    echo "FFmpeg is required for Kokoro TTS (mlx-audio)."
+    if command -v brew &>/dev/null; then
+        read -p "Install ffmpeg via Homebrew? [Y/n]: " INSTALL_FFMPEG
+        INSTALL_FFMPEG=${INSTALL_FFMPEG:-Y}
+        if [[ "$INSTALL_FFMPEG" =~ ^[Yy]$ ]]; then
+            echo "Installing ffmpeg..."
+            brew install ffmpeg
+        else
+            echo "Error: ffmpeg is required. Install it manually and re-run."
+            exit 1
+        fi
+    else
+        echo "Error: ffmpeg not found and Homebrew not available."
+        echo "Install ffmpeg manually (e.g. brew install ffmpeg) and re-run."
+        exit 1
+    fi
 fi
 
 # Stop running daemon before updating (check both PID file and running processes)
@@ -74,7 +126,7 @@ fi
 
 # Create directories
 echo "Creating directories..."
-mkdir -p "$INSTALL_DIR"/{daemon,models/whisper,models/piper,logs}
+mkdir -p "$INSTALL_DIR"/{daemon,models/whisper,logs}
 mkdir -p "$CLAUDE_HOOKS_DIR"
 
 # Copy daemon files (always update these)
@@ -101,42 +153,117 @@ else
     fi
 fi
 
+# Find suitable Python (3.12+ required for mlx-audio dependencies)
+PYTHON_BIN=""
+
+# Check pyenv versions first (most reliable on macOS)
+for pyver in 3.13 3.12; do
+    for p in "$HOME/.pyenv/versions/$pyver"*/bin/python3; do
+        if [ -x "$p" ]; then
+            PYTHON_BIN="$p"
+            break 2
+        fi
+    done
+done
+
+# Fall back to system pythons (skip pyenv shims which may not resolve)
+if [ -z "$PYTHON_BIN" ]; then
+    for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+        if [ -x "$candidate" ]; then
+            PY_MINOR=$("$candidate" -c "import sys; print(sys.version_info[1])" 2>/dev/null || echo "0")
+            if [ "$PY_MINOR" -ge 12 ] 2>/dev/null; then
+                PYTHON_BIN="$candidate"
+                break
+            fi
+        fi
+    done
+fi
+
+if [ -z "$PYTHON_BIN" ]; then
+    echo "Error: Python 3.12+ is required but not found."
+    echo "Install it with: pyenv install 3.13"
+    exit 1
+fi
+
+echo "Using Python: $($PYTHON_BIN --version 2>&1)"
+
 # Create or reuse virtual environment
 if [ ! -d "$INSTALL_DIR/venv" ]; then
     echo "Creating Python virtual environment..."
-    python3 -m venv "$INSTALL_DIR/venv"
+    "$PYTHON_BIN" -m venv "$INSTALL_DIR/venv"
 else
-    echo "Using existing virtual environment..."
+    # Check existing venv Python version is 3.12+
+    VENV_MINOR=$("$INSTALL_DIR/venv/bin/python3" -c "import sys; print(sys.version_info[1])" 2>/dev/null || echo "0")
+    if [ "$VENV_MINOR" -lt 12 ] 2>/dev/null; then
+        echo "Recreating virtual environment with Python 3.12+..."
+        rm -rf "$INSTALL_DIR/venv"
+        "$PYTHON_BIN" -m venv "$INSTALL_DIR/venv"
+    else
+        echo "Using existing virtual environment..."
+    fi
 fi
 
 source "$INSTALL_DIR/venv/bin/activate"
 
 # Install/upgrade Python dependencies
 if [ "$IS_UPDATE" = true ]; then
-    echo "Updating Python dependencies..."
+    _spin_run "Updating Python dependencies" pip install --upgrade pip -q
 else
-    echo "Installing Python dependencies..."
+    _spin_run "Installing Python dependencies" pip install --upgrade pip -q
 fi
-pip install --upgrade pip -q
-pip install --upgrade pynput sounddevice pyyaml -q
-echo "  Core dependencies installed"
+_spin_run "Installing core dependencies" pip install --upgrade --only-binary av pynput sounddevice pyyaml mlx-audio "misaki<0.8" num2words phonemizer spacy espeakng-loader -q
+_spin_run "Downloading spacy English model" python3 -m spacy download en_core_web_sm --no-cache-dir -q
+
+# Migrate Piper TTS config to Kokoro (must run after venv + deps are installed)
+if grep -q 'piper\|en_GB-\|en_US-' "$INSTALL_DIR/config.yaml" 2>/dev/null; then
+    echo "  Migrating speech config from Piper to Kokoro..."
+    "$INSTALL_DIR/venv/bin/python3" << 'MIGRATE'
+import os, re
+
+config_path = os.path.expanduser("~/.claude-voice/config.yaml")
+with open(config_path) as f:
+    text = f.read()
+
+changed = False
+
+# Migrate Piper voice to Kokoro default
+if re.search(r'voice:\s*["\']?en_(GB|US)-', text):
+    text = re.sub(r'(voice:\s*)["\']?en_\w+-[\w-]+["\']?', r'\1"af_heart"', text)
+    changed = True
+
+# Add lang_code if missing (insert after voice line)
+if "lang_code" not in text:
+    text = re.sub(r'(voice:.*\n)', r'\1  lang_code: "a"\n', text)
+    changed = True
+
+# Reset speed from Piper default
+if re.search(r'speed:\s*1\.3\b', text):
+    text = re.sub(r'(speed:\s*)1\.3', r'\g<1>1.0', text)
+    changed = True
+
+if changed:
+    with open(config_path, "w") as f:
+        f.write(text)
+    print("  Config migrated: voice -> af_heart, lang_code -> a")
+else:
+    print("  Config already up to date")
+MIGRATE
+fi
 
 # Determine STT backend - check existing config on updates
 CURRENT_BACKEND=""
 if [ "$IS_UPDATE" = true ] && [ -f "$INSTALL_DIR/config.yaml" ]; then
-    # Extract value between quotes: backend: "mlx" -> mlx
-    CURRENT_BACKEND=$(grep -E '^\s*backend:' "$INSTALL_DIR/config.yaml" | sed 's/.*backend:[[:space:]]*"\([^"]*\)".*/\1/')
+    # Extract backend value: handles backend: "mlx", backend: mlx, and inline comments
+    CURRENT_BACKEND=$(grep -E '^\s*backend:' "$INSTALL_DIR/config.yaml" | sed 's/.*backend:[[:space:]]*//' | sed 's/[[:space:]]*#.*//' | tr -d '"' | xargs)
 fi
 
 if [ -n "$CURRENT_BACKEND" ]; then
     echo ""
-    echo "Updating speech-to-text backend ($CURRENT_BACKEND)... (this may take a moment)"
     if [ "$CURRENT_BACKEND" = "mlx" ]; then
-        pip install --upgrade mlx-whisper -q
+        _spin_run "Updating speech-to-text backend (mlx)" pip install --upgrade --only-binary av mlx-whisper -q
     else
-        pip install --upgrade faster-whisper -q
+        _spin_run "Updating speech-to-text backend (faster-whisper)" pip install --upgrade --only-binary av faster-whisper -q
     fi
-    echo "  Speech-to-text backend updated"
 else
     # Fresh install - ask about backend
     echo ""
@@ -154,56 +281,14 @@ else
     fi
 
     if [[ "$USE_MLX" =~ ^[Yy]$ ]]; then
-        echo "Installing mlx-whisper... (this may take a moment)"
-        pip install mlx-whisper -q
-        echo "  MLX Whisper installed"
+        _spin_run "Installing mlx-whisper" pip install mlx-whisper -q
         # Update config to use mlx backend
         if grep -q 'backend: "faster-whisper"' "$INSTALL_DIR/config.yaml"; then
             sed -i '' 's/backend: "faster-whisper"/backend: "mlx"/' "$INSTALL_DIR/config.yaml"
         fi
     else
-        echo "Installing faster-whisper... (this may take a moment)"
-        pip install faster-whisper -q
-        echo "  Faster Whisper installed"
+        _spin_run "Installing faster-whisper" pip install faster-whisper -q
     fi
-fi
-
-# Download Piper TTS binary (uses native binary instead of Python library for macOS compatibility)
-echo ""
-PIPER_DIR="$INSTALL_DIR/piper"
-mkdir -p "$PIPER_DIR"
-
-if [ ! -f "$PIPER_DIR/piper" ]; then
-    echo "Downloading Piper TTS binary..."
-    if [[ "$(uname)" == "Darwin" ]]; then
-        if [[ "$(uname -m)" == "arm64" ]]; then
-            PIPER_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_macos_aarch64.tar.gz"
-        else
-            PIPER_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_macos_x64.tar.gz"
-        fi
-    else
-        PIPER_URL="https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz"
-    fi
-    curl -L "$PIPER_URL" 2>/dev/null | tar -xz -C "$PIPER_DIR" --strip-components=1
-    chmod +x "$PIPER_DIR/piper"
-    echo "Piper TTS binary installed"
-else
-    echo "Piper TTS binary already installed"
-fi
-
-# Download default voice model
-echo ""
-VOICE_MODEL="en_GB-alan-medium"
-VOICE_DIR="$INSTALL_DIR/models/piper"
-
-if [ ! -f "$VOICE_DIR/$VOICE_MODEL.onnx" ]; then
-    echo "Downloading Piper voice model ($VOICE_MODEL)..."
-    curl -L -o "$VOICE_DIR/$VOICE_MODEL.onnx" \
-      "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/$VOICE_MODEL.onnx" 2>/dev/null
-    curl -L -o "$VOICE_DIR/$VOICE_MODEL.onnx.json" \
-      "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/$VOICE_MODEL.onnx.json" 2>/dev/null
-else
-    echo "Voice model already downloaded"
 fi
 
 # Install Claude Code hook

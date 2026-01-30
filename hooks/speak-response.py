@@ -1,18 +1,16 @@
 #!/bin/bash
 # -*- mode: python -*-
 ''''exec "$HOME/.claude-voice/venv/bin/python3" "$0" "$@" # '''
-"""Claude Code hook to speak responses via Piper TTS."""
+"""Claude Code hook to speak responses via Kokoro TTS daemon."""
 
 import json
 import os
 import re
-import subprocess
+import socket
 import sys
-import tempfile
 
 # Paths
-PIPER_BIN = os.path.expanduser("~/.claude-voice/piper/piper")
-MODELS_DIR = os.path.expanduser("~/.claude-voice/models/piper")
+TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
 CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 
@@ -82,46 +80,22 @@ def clean_text_for_speech(text: str, config: dict) -> str:
     return text
 
 def speak(text: str, config: dict) -> None:
-    """Speak text using Piper TTS binary."""
+    """Send text to the daemon's TTS server."""
     if not text:
         return
 
-    voice_name = config.get('voice', 'en_GB-alan-medium')
-    voice_model = os.path.join(MODELS_DIR, f"{voice_name}.onnx")
-
-    if not os.path.exists(voice_model):
-        print(f"Voice model not found at {voice_model}", file=sys.stderr)
-        return
-
-    if not os.path.exists(PIPER_BIN):
-        print(f"Piper binary not found at {PIPER_BIN}", file=sys.stderr)
-        return
-
     try:
-        # Create temporary WAV file
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-            tmp_path = tmp.name
-
-        # Use Piper binary to synthesize
-        piper_proc = subprocess.run(
-            [PIPER_BIN, '--model', voice_model, '--output_file', tmp_path],
-            input=text.encode('utf-8'),
-            capture_output=True,
-        )
-
-        if piper_proc.returncode != 0:
-            print(f"Piper error: {piper_proc.stderr.decode()}", file=sys.stderr)
-            return
-
-        # Play the audio (with speed adjustment)
-        speed = config.get('speed', 1.0)
-        subprocess.run(['afplay', '-r', str(speed), tmp_path], check=True)
-
-        # Clean up
-        os.unlink(tmp_path)
-
-    except Exception as e:
-        print(f"TTS error: {e}", file=sys.stderr)
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(TTS_SOCK_PATH)
+        s.sendall(json.dumps({
+            "text": text,
+            "voice": config.get("voice", "af_heart"),
+            "speed": config.get("speed", 1.0),
+            "lang_code": config.get("lang_code", "a"),
+        }).encode())
+        s.close()
+    except (ConnectionRefusedError, FileNotFoundError):
+        pass  # Daemon not running, silent fail
 
 def main():
     # Read hook input from stdin

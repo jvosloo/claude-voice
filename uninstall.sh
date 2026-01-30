@@ -109,31 +109,31 @@ if [ -f "$INSTALL_DIR/config.yaml" ]; then
     fi
 fi
 
-# Handle downloaded models
-MODELS_SIZE=$(du -sh "$INSTALL_DIR/models" 2>/dev/null | cut -f1)
-if [ -d "$INSTALL_DIR/models" ] && [ -n "$(ls -A "$INSTALL_DIR/models/piper" 2>/dev/null)" ]; then
+# Handle downloaded Kokoro TTS model (in Hugging Face cache)
+KOKORO_CACHE="$HOME/.cache/huggingface/hub/models--mlx-community--Kokoro-82M-bf16"
+if [ -d "$KOKORO_CACHE" ]; then
+    KOKORO_SIZE=$(du -sh "$KOKORO_CACHE" 2>/dev/null | cut -f1)
     echo ""
-    read -p "Delete downloaded voice models? ($MODELS_SIZE) [y/N]: " DEL_MODELS
-    if [[ "$DEL_MODELS" =~ ^[Yy]$ ]]; then
-        rm -rf "$INSTALL_DIR/models"
-        echo "Deleted models"
+    read -p "Delete downloaded Kokoro TTS model? ($KOKORO_SIZE) [y/N]: " DEL_KOKORO
+    if [[ "$DEL_KOKORO" =~ ^[Yy]$ ]]; then
+        rm -rf "$KOKORO_CACHE"
+        echo "Deleted Kokoro model cache"
     else
-        echo "Keeping models at $INSTALL_DIR/models/"
-        KEEP_MODELS=true
+        echo "Keeping Kokoro model at $KOKORO_CACHE"
     fi
 fi
 
 # Remove main installation directory
 echo ""
-if [ "$KEEP_CONFIG" = true ] || [ "$KEEP_MODELS" = true ]; then
+if [ "$KEEP_CONFIG" = true ]; then
     echo "Removing installation (keeping preserved files)..."
     # Remove everything except what user chose to keep
     rm -rf "$INSTALL_DIR/daemon"
     rm -rf "$INSTALL_DIR/venv"
     rm -rf "$INSTALL_DIR/logs"
-    rm -rf "$INSTALL_DIR/piper"
     rm -f "$INSTALL_DIR/daemon.pid"
     rm -f "$INSTALL_DIR/.silent"
+    rm -f "$INSTALL_DIR/.tts.sock"
     rm -f "$INSTALL_DIR/claude-voice-daemon"
     rm -f "$INSTALL_DIR/config.yaml.example"
     rm -f "$INSTALL_DIR/.DS_Store"
@@ -141,13 +141,13 @@ if [ "$KEEP_CONFIG" = true ] || [ "$KEEP_MODELS" = true ]; then
     rm -f "$INSTALL_DIR/README.md"
     rm -f "$INSTALL_DIR/requirements.txt"
     rm -f "$INSTALL_DIR/install.sh"
-    [ "$KEEP_MODELS" != true ] && rm -rf "$INSTALL_DIR/models"
-    [ "$KEEP_CONFIG" != true ] && rm -f "$INSTALL_DIR/config.yaml"
+    rm -rf "$INSTALL_DIR/models"
 
     # Remove directory if empty
     rmdir "$INSTALL_DIR" 2>/dev/null || true
 else
     echo "Removing installation directory..."
+    rm -f "$INSTALL_DIR/.tts.sock"
     rm -rf "$INSTALL_DIR"
 fi
 

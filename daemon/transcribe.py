@@ -26,22 +26,21 @@ class Transcriber:
     def _ensure_model(self):
         """Lazy-load the Whisper model."""
         if self._model is None:
+            from daemon.spinner import Spinner
             if self.backend == "mlx":
-                print(f"Loading MLX Whisper model: {self.model_name}...")
-                # Warm up MLX by doing a dummy transcription (triggers actual model load)
-                silent_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
-                self._transcribe_mlx(silent_audio)
-                self._model = "mlx"
-                print("MLX Whisper ready.")
+                with Spinner(f"Loading MLX Whisper model: {self.model_name}"):
+                    # Warm up MLX by doing a dummy transcription (triggers actual model load)
+                    silent_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
+                    self._transcribe_mlx(silent_audio)
+                    self._model = "mlx"
             else:
                 from faster_whisper import WhisperModel
-                print(f"Loading Whisper model: {self.model_name}...")
-                self._model = WhisperModel(
-                    self.model_name,
-                    device=self.device,
-                    download_root=self._model_dir,
-                )
-                print("Whisper model loaded.")
+                with Spinner(f"Loading Whisper model: {self.model_name}"):
+                    self._model = WhisperModel(
+                        self.model_name,
+                        device=self.device,
+                        download_root=self._model_dir,
+                    )
         return self._model
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:

@@ -8,6 +8,14 @@ When used with Claude Code, responses are spoken aloud via neural TTS — enabli
 
 ---
 
+## Prerequisites
+
+- **macOS** (Apple Silicon recommended)
+- **Python 3.12+** — install via [pyenv](https://github.com/pyenv/pyenv) (`pyenv install 3.13`) or Homebrew (`brew install python@3.13`)
+- **ffmpeg** — required by mlx-audio; the installer will offer to install it via Homebrew if missing
+
+---
+
 ## Installation
 
 ```bash
@@ -19,7 +27,7 @@ cd claude-voice
 The installer will:
 - Create `~/.claude-voice/` with daemon files
 - Set up a Python virtual environment with dependencies
-- Download Piper TTS binary and default voice model
+- Install Kokoro TTS (via mlx-audio, Apple Silicon optimized)
 - Install the Claude Code TTS hook
 - Optionally install MLX Whisper (recommended for Apple Silicon)
 - Check and prompt for Microphone and Accessibility permissions
@@ -125,11 +133,13 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `voice` | `en_GB-alan-medium` | Piper voice model |
-| `speed` | `1.3` | Playback speed (1.0 = normal) |
+| `voice` | `af_heart` | Kokoro voice ID (see Available Voices below) |
+| `speed` | `1.0` | Playback speed (1.0 = normal) |
+| `lang_code` | `a` | Language code: `a` American, `b` British, `j` Japanese, `z` Chinese, `e` Spanish, `f` French |
 | `enabled` | `true` | Enable/disable TTS output |
 | `max_chars` | `null` | Limit spoken output length (`null` = unlimited) |
 | `skip_code_blocks` | `true` | Don't speak code blocks |
+| `skip_tool_results` | `true` | Don't speak tool result output |
 
 ### Transcription Settings
 
@@ -176,16 +186,31 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 
 ## Available Voices
 
-Downloaded voices are stored in `~/.claude-voice/models/piper/`.
+Kokoro TTS provides 54 voice presets. The model downloads automatically on first use (~360MB).
 
-| Voice | Style |
-|-------|-------|
-| `en_GB-alan-medium` | British male |
-| `en_US-ryan-high` | American male (high quality) |
-| `en_US-ryan-medium` | American male |
-| `en_US-amy-medium` | American female |
+**Voice ID format:** `{lang}{gender}_{name}` — e.g., `af_heart` = American female "heart"
 
-Browse more at: https://huggingface.co/rhasspy/piper-voices/tree/main/en
+### American English (`lang_code: "a"`)
+
+| Voice | Description |
+|-------|-------------|
+| `af_heart` | Female (default, warmest rated) |
+| `af_bella` | Female |
+| `af_nova` | Female |
+| `af_sky` | Female |
+| `am_adam` | Male |
+| `am_echo` | Male |
+
+### British English (`lang_code: "b"`)
+
+| Voice | Description |
+|-------|-------------|
+| `bf_alice` | Female |
+| `bf_emma` | Female |
+| `bm_daniel` | Male |
+| `bm_george` | Male |
+
+Full voice list: https://huggingface.co/mlx-community/Kokoro-82M-bf16/blob/main/VOICES.md
 
 ---
 
@@ -197,11 +222,12 @@ Browse more at: https://huggingface.co/rhasspy/piper-voices/tree/main/en
 - `~/.claude-voice/config.yaml` - Configuration file
 - `~/.claude-voice/logs/` - Installation and daemon logs
 
-### Voice Output (Hook)
-- `~/.claude-voice/piper/` - Piper TTS binary
-- `~/.claude/hooks/speak-response.py` - TTS hook
+### Voice Output (Hook + Daemon)
+- `~/.claude/hooks/speak-response.py` - Hook sends text to daemon
 - `~/.claude/settings.json` - Claude Code Stop hook config
+- `~/.claude-voice/.tts.sock` - Unix socket for hook-to-daemon TTS communication (runtime)
+- Kokoro TTS model cached at `~/.cache/huggingface/hub/models--mlx-community--Kokoro-82M-bf16/`
 
 ### Models
 - `~/.claude-voice/models/whisper/` - Whisper speech recognition models (auto-downloaded)
-- `~/.claude-voice/models/piper/` - Piper TTS voice models
+- Kokoro TTS model (auto-downloaded via Hugging Face on first use, ~360MB)

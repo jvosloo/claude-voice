@@ -6,6 +6,11 @@ pyyaml>=6.0
 
 # TTS (Kokoro via mlx-audio, Apple Silicon optimized)
 mlx-audio
+misaki<0.8
+num2words
+phonemizer
+spacy
+espeakng-loader
 
 # Speech-to-text (choose one backend)
 # For CPU (cross-platform):

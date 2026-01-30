@@ -27,8 +27,9 @@ class TranscriptionConfig:
 @dataclass
 class SpeechConfig:
     enabled: bool = True
-    voice: str = "en_GB-alan-medium"
+    voice: str = "af_heart"
     speed: float = 1.0
+    lang_code: str = "a"
     max_chars: Optional[int] = None
     skip_code_blocks: bool = True
     skip_tool_results: bool = True

@@ -3,9 +3,10 @@
 import os
 import sys
 import signal
-import subprocess
 import threading
+import json
 import numpy as np
+import socket
 
 # Suppress multiprocessing resource_tracker warnings on forced shutdown
 # This happens when sounddevice's internal semaphores aren't cleaned up
@@ -30,31 +31,38 @@ from daemon.transcribe import Transcriber
 from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
 from daemon.cleanup import TranscriptionCleaner
+from daemon.tts import TTSEngine
 
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
+TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
+
+_cue_stream: sd.OutputStream | None = None
+_cue_lock = threading.Lock()
 
 def _play_cue(frequencies: list[int], duration: float = 0.05, sample_rate: int = 44100) -> None:
-    """Play a short audio cue with the given frequency sequence.
+    """Play a short audio cue with the given frequency sequence."""
+    global _cue_stream
 
-    Args:
-        frequencies: List of frequencies to play in sequence (e.g., [440, 880] for ascending)
-        duration: Duration of each tone in seconds
-        sample_rate: Audio sample rate
-    """
     def _play():
+        global _cue_stream
         samples = []
         for freq in frequencies:
             t = np.linspace(0, duration, int(sample_rate * duration), False)
-            # Sine wave with quick fade in/out to avoid clicks
             tone = np.sin(2 * np.pi * freq * t)
             fade_samples = int(sample_rate * 0.005)  # 5ms fade
             tone[:fade_samples] *= np.linspace(0, 1, fade_samples)
             tone[-fade_samples:] *= np.linspace(1, 0, fade_samples)
             samples.append(tone)
 
-        audio = np.concatenate(samples).astype(np.float32) * 0.3  # Low volume
-        sd.play(audio, sample_rate)
-        sd.wait()
+        audio = np.concatenate(samples).astype(np.float32) * 0.3
+
+        with _cue_lock:
+            if _cue_stream is None or not _cue_stream.active:
+                _cue_stream = sd.OutputStream(
+                    samplerate=sample_rate, channels=1, dtype=np.float32,
+                )
+                _cue_stream.start()
+            _cue_stream.write(audio.reshape(-1, 1))
 
     threading.Thread(target=_play, daemon=True).start()
 
@@ -86,6 +94,11 @@ class VoiceDaemon:
             on_release=self._on_hotkey_release,
         )
 
+        self.tts_engine = TTSEngine()
+        self._tts_server = None
+        self._shutting_down = False
+        self._interrupted_tts = False
+
         # Optional transcription cleanup via LLM
         self.cleaner = None
         if self.config.input.transcription_cleanup:
@@ -101,11 +114,8 @@ class VoiceDaemon:
         # Play ascending cue to signal recording started
         _play_cue([440, 880])
         print("Recording...")
-        # Stop any TTS playback asynchronously
-        threading.Thread(
-            target=lambda: subprocess.run(['pkill', '-9', 'afplay'], stderr=subprocess.DEVNULL),
-            daemon=True
-        ).start()
+        # Stop any TTS playback
+        self._interrupted_tts = self.tts_engine.stop_playback()
 
     def _handle_voice_command(self, text: str) -> bool:
         """Check for voice commands. Returns True if command was handled."""
@@ -127,6 +137,51 @@ class VoiceDaemon:
 
         return False
 
+    def _run_tts_server(self) -> None:
+        """Run Unix socket server for TTS requests from the hook."""
+        # Clean up stale socket file
+        if os.path.exists(TTS_SOCK_PATH):
+            os.unlink(TTS_SOCK_PATH)
+
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(TTS_SOCK_PATH)
+        server.listen(1)
+        server.settimeout(1.0)  # Allow periodic shutdown checks
+
+        self._tts_server = server
+
+        while not self._shutting_down:
+            try:
+                conn, _ = server.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            try:
+                data = b""
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                conn.close()
+
+                request = json.loads(data.decode())
+                text = request.get("text", "")
+                voice = request.get("voice", self.config.speech.voice)
+                speed = request.get("speed", self.config.speech.speed)
+                lang_code = request.get("lang_code", self.config.speech.lang_code)
+
+                if text:
+                    self.tts_engine.speak(text, voice=voice, speed=speed, lang_code=lang_code)
+            except Exception as e:
+                print(f"TTS server error: {e}")
+
+        server.close()
+        if os.path.exists(TTS_SOCK_PATH):
+            os.unlink(TTS_SOCK_PATH)
+
     def _on_hotkey_release(self) -> None:
         """Called when hotkey is released - stop, transcribe, type."""
         audio = self.recorder.stop()
@@ -135,7 +190,8 @@ class VoiceDaemon:
         duration = self.recorder.get_duration(audio)
 
         if duration < self.config.input.min_audio_length:
-            print(f"Too short ({duration:.1f}s), ignoring")
+            if duration > 0.1 and not self._interrupted_tts:
+                print(f"Too short ({duration:.1f}s), ignoring")
             return
 
         print(f"Transcribing {duration:.1f}s of audio...")
@@ -166,6 +222,14 @@ class VoiceDaemon:
     def _shutdown(self) -> None:
         """Clean shutdown of the daemon."""
         print("\nShutting down...")
+        self._shutting_down = True
+        if self._tts_server:
+            try:
+                self._tts_server.close()
+            except Exception:
+                pass
+        if os.path.exists(TTS_SOCK_PATH):
+            os.unlink(TTS_SOCK_PATH)
         self.hotkey_listener.stop()
         self.recorder.shutdown()
 
@@ -195,9 +259,10 @@ class VoiceDaemon:
         print("Press Ctrl+C to stop")
         print("=" * 50)
 
-        # Pre-load Whisper model
-        print("Loading Whisper model (first time may take a moment)...")
+        # Pre-load models
         self.transcriber._ensure_model()
+        if self.config.speech.enabled:
+            self.tts_engine._ensure_model()
 
         # Check transcription cleanup if enabled
         if self.cleaner:
@@ -206,6 +271,11 @@ class VoiceDaemon:
 
         print("Ready! Hold the hotkey and speak.")
         print()
+
+        # Start TTS socket server
+        tts_thread = threading.Thread(target=self._run_tts_server, daemon=True)
+        tts_thread.start()
+        print(f"TTS server listening on {TTS_SOCK_PATH}")
 
         self.hotkey_listener.start()
 
