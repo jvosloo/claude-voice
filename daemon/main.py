@@ -264,6 +264,21 @@ class VoiceDaemon:
         if self.config.speech.enabled:
             self.tts_engine._ensure_model()
 
+            # Sound check
+            print('\nSound check: playing "Hello!! Can you hear me?"')
+            self.tts_engine.speak(
+                "Hello!! Can you hear me?",
+                voice=self.config.speech.voice,
+                speed=self.config.speech.speed,
+                lang_code=self.config.speech.lang_code,
+            )
+            answer = input("Did you hear the test phrase? [Y/n] ").strip().lower()
+            if answer in ("n", "no"):
+                print("Tip: check your audio output device and volume settings.")
+                print("Continuing startup anyway...\n")
+            else:
+                print("Sound check passed.\n")
+
         # Check transcription cleanup if enabled
         if self.cleaner:
             if not self.cleaner.ensure_ready():
