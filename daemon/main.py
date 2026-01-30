@@ -36,6 +36,7 @@ from daemon.hotkey import HotkeyListener
 from daemon.cleanup import TranscriptionCleaner
 from daemon.tts import TTSEngine
 from daemon.notify import classify, play_phrase, stop_playback as stop_notify_playback
+from daemon.afk import AfkManager
 
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
@@ -131,6 +132,7 @@ class VoiceDaemon:
         self._tts_server = None
         self._shutting_down = False
         self._interrupted_tts = False
+        self.afk = AfkManager(self.config)
 
         # Optional transcription cleanup via LLM
         self.cleaner = None
@@ -195,7 +197,39 @@ class VoiceDaemon:
             print("Switched to notify mode")
             return True
 
+        # AFK mode commands
+        if text_lower in self.config.afk.voice_commands_activate:
+            if not self.afk.is_configured:
+                print("AFK mode: Telegram not configured")
+                return True
+            if self.afk.active:
+                print("Already in AFK mode")
+                return True
+            self.afk._previous_mode = _read_mode()
+            _write_mode("afk")
+            if self.afk.activate(on_deactivate=self._exit_afk):
+                _play_cue([440, 660, 880])  # Ascending triple-tone
+                print("AFK mode activated - notifications going to Telegram")
+            else:
+                _write_mode(self.afk._previous_mode or "notify")
+                print("AFK mode: failed to connect to Telegram")
+            return True
+
+        if text_lower in self.config.afk.voice_commands_deactivate:
+            if self.afk.active:
+                self._exit_afk()
+                _play_cue([880, 660, 440])  # Descending triple-tone
+                print("AFK mode deactivated - back to voice")
+            return True
+
         return False
+
+    def _exit_afk(self) -> None:
+        """Exit AFK mode and restore previous voice mode."""
+        previous = self.afk._previous_mode or "notify"
+        self.afk.deactivate()
+        _write_mode(previous)
+        print(f"Restored {previous} mode")
 
     def _run_tts_server(self) -> None:
         """Run Unix socket server for TTS requests from the hook."""
@@ -225,9 +259,24 @@ class VoiceDaemon:
                     if not chunk:
                         break
                     data += chunk
-                conn.close()
 
                 request = json.loads(data.decode())
+
+                # Check if this is an AFK-eligible request
+                session = request.get("session")
+
+                if self.afk.active and session:
+                    # Route through AFK manager
+                    response = self.afk.handle_hook_request(request)
+                    # Send response back to hook
+                    conn.sendall(json.dumps(response).encode())
+                    conn.close()
+                    continue
+
+                # Not AFK - send non-waiting response and handle normally
+                if session:
+                    conn.sendall(json.dumps({"wait": False}).encode())
+                conn.close()
 
                 # Direct category from hooks (e.g. PreToolUse permission)
                 notify_category = request.get("notify_category")
@@ -303,6 +352,8 @@ class VoiceDaemon:
     def _shutdown(self) -> None:
         """Clean shutdown of the daemon."""
         print("\nShutting down...")
+        if self.afk.active:
+            self.afk.deactivate()
         self._shutting_down = True
 
         # Hide overlay
@@ -361,6 +412,10 @@ class VoiceDaemon:
         if not os.path.exists(MODE_FILE):
             _write_mode(self.config.speech.mode)
         print(f"TTS mode: {_read_mode()}")
+        if self.afk.is_configured:
+            print(f"AFK mode: configured (Telegram)")
+        else:
+            print(f"AFK mode: not configured (set telegram bot_token and chat_id)")
 
         # Pre-load models
         self.transcriber._ensure_model()
