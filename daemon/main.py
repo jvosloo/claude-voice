@@ -126,6 +126,8 @@ class VoiceDaemon:
             language_hotkey=self.config.input.language_hotkey,
             languages=self._languages,
             on_language_change=self._on_language_change,
+            combo_hotkey=self.config.afk.hotkey,
+            on_combo=self._toggle_afk,
         )
 
         self.tts_engine = TTSEngine()
@@ -133,12 +135,6 @@ class VoiceDaemon:
         self._shutting_down = False
         self._interrupted_tts = False
         self.afk = AfkManager(self.config)
-
-        # AFK hotkey (separate from push-to-talk)
-        self._afk_hotkey_listener = None
-        afk_hotkey = self.config.afk.hotkey
-        if afk_hotkey and "+" in afk_hotkey:
-            self._setup_afk_hotkey(afk_hotkey)
 
         # Optional transcription cleanup via LLM
         self.cleaner = None
@@ -215,6 +211,8 @@ class VoiceDaemon:
             _write_mode("afk")
             if self.afk.activate(on_deactivate=self._exit_afk):
                 _play_cue([440, 660, 880])  # Ascending triple-tone
+                from daemon import overlay
+                overlay.show_flash("AFK")
                 print("AFK mode activated - notifications going to Telegram")
             else:
                 _write_mode(self.afk._previous_mode or "notify")
@@ -225,6 +223,8 @@ class VoiceDaemon:
             if self.afk.active:
                 self._exit_afk()
                 _play_cue([880, 660, 440])  # Descending triple-tone
+                from daemon import overlay
+                overlay.show_flash("AFK OFF")
                 print("AFK mode deactivated - back to voice")
             return True
 
@@ -237,45 +237,13 @@ class VoiceDaemon:
         _write_mode(previous)
         print(f"Restored {previous} mode")
 
-    def _setup_afk_hotkey(self, hotkey_str: str) -> None:
-        """Set up AFK hotkey listener for modifier+key combos."""
-        from pynput import keyboard as kb
-
-        parts = hotkey_str.split("+")
-        if len(parts) != 2:
-            print(f"AFK hotkey: unsupported format '{hotkey_str}' (expected modifier+key)")
-            return
-
-        from daemon.hotkey import KEY_MAP
-        modifier_name, key_char = parts[0], parts[1]
-        modifier = KEY_MAP.get(modifier_name)
-        if not modifier:
-            print(f"AFK hotkey: unknown modifier '{modifier_name}'")
-            return
-
-        pressed_keys = set()
-
-        def on_press(key):
-            pressed_keys.add(key)
-            try:
-                if key == modifier:
-                    return
-                if hasattr(key, 'char') and key.char == key_char and modifier in pressed_keys:
-                    self._toggle_afk()
-            except AttributeError:
-                pass
-
-        def on_release(key):
-            pressed_keys.discard(key)
-
-        self._afk_hotkey_listener = kb.Listener(on_press=on_press, on_release=on_release)
-        self._afk_hotkey_listener.start()
-
     def _toggle_afk(self) -> None:
         """Toggle AFK mode on/off."""
+        from daemon import overlay
         if self.afk.active:
             self._exit_afk()
             _play_cue([880, 660, 440])
+            overlay.show_flash("AFK OFF")
             print("AFK mode deactivated")
         else:
             if not self.afk.is_configured:
@@ -285,6 +253,7 @@ class VoiceDaemon:
             _write_mode("afk")
             if self.afk.activate(on_deactivate=self._exit_afk):
                 _play_cue([440, 660, 880])
+                overlay.show_flash("AFK")
                 print("AFK mode activated")
             else:
                 _write_mode(self.afk._previous_mode or "notify")
@@ -427,8 +396,6 @@ class VoiceDaemon:
         if os.path.exists(TTS_SOCK_PATH):
             os.unlink(TTS_SOCK_PATH)
         self.hotkey_listener.stop()
-        if self._afk_hotkey_listener:
-            self._afk_hotkey_listener.stop()
         self.recorder.shutdown()
 
         # Cocoa run loop exits via self._shutting_down flag
@@ -478,53 +445,7 @@ class VoiceDaemon:
         else:
             print(f"AFK mode: not configured (set telegram bot_token and chat_id)")
 
-        # Pre-load models
-        self.transcriber._ensure_model()
-        if self.config.speech.enabled:
-            self.tts_engine._ensure_model()
-
-            # Sound check (only in interactive/foreground mode)
-            if sys.stdin.isatty():
-                print('\nSound check: playing "Hello!! Can you hear me?"')
-                self.tts_engine.speak(
-                    "Hello!! Can you hear me?",
-                    voice=self.config.speech.voice,
-                    speed=self.config.speech.speed,
-                    lang_code=self.config.speech.lang_code,
-                )
-                answer = input("Did you hear the test phrase? [Y/n] ").strip().lower()
-                if answer in ("n", "no"):
-                    print("Tip: check your audio output device and volume settings.")
-                    print("Continuing startup anyway...\n")
-                else:
-                    print("Sound check passed.\n")
-
-        # Regenerate custom notify phrases if needed
-        if self.config.speech.mode == "notify" or self.config.speech.notify_phrases:
-            from daemon.notify import regenerate_custom_phrases
-            is_foreground = sys.stdin.isatty()
-            regenerate_custom_phrases(
-                self.config.speech.notify_phrases,
-                voice=self.config.speech.voice,
-                speed=self.config.speech.speed,
-                lang_code=self.config.speech.lang_code,
-                interactive=is_foreground,
-            )
-
-        # Check transcription cleanup if enabled
-        if self.cleaner:
-            if not self.cleaner.ensure_ready():
-                self.cleaner = None  # Disable on failure
-
-        print("Ready! Hold the hotkey and speak.")
-        print()
-
-        # Start TTS socket server
-        tts_thread = threading.Thread(target=self._run_tts_server, daemon=True)
-        tts_thread.start()
-        print(f"TTS server listening on {TTS_SOCK_PATH}")
-
-        # Initialize overlay on main thread
+        # Initialize overlay early for startup feedback
         overlay_cfg = self.config.overlay
         if overlay_cfg.enabled:
             from daemon import overlay
@@ -533,11 +454,68 @@ class VoiceDaemon:
                 transcribing_color=overlay_cfg.transcribing_color,
                 style=overlay_cfg.style,
             )
+            overlay.show_loading_flash("Claude Voice Starting")
 
-        # Start hotkey listener on background thread
-        self.hotkey_listener.start()
+        def _finish_startup():
+            """Heavy startup work (model loading, etc.) — runs in background thread."""
+            # Pre-load models
+            self.transcriber._ensure_model()
+            if self.config.speech.enabled:
+                self.tts_engine._ensure_model()
+
+                # Sound check (only in interactive/foreground mode)
+                if sys.stdin.isatty():
+                    print('\nSound check: playing "Hello!! Can you hear me?"')
+                    self.tts_engine.speak(
+                        "Hello!! Can you hear me?",
+                        voice=self.config.speech.voice,
+                        speed=self.config.speech.speed,
+                        lang_code=self.config.speech.lang_code,
+                    )
+                    answer = input("Did you hear the test phrase? [Y/n] ").strip().lower()
+                    if answer in ("n", "no"):
+                        print("Tip: check your audio output device and volume settings.")
+                        print("Continuing startup anyway...\n")
+                    else:
+                        print("Sound check passed.\n")
+
+            # Regenerate custom notify phrases if needed
+            if self.config.speech.mode == "notify" or self.config.speech.notify_phrases:
+                from daemon.notify import regenerate_custom_phrases
+                is_foreground = sys.stdin.isatty()
+                regenerate_custom_phrases(
+                    self.config.speech.notify_phrases,
+                    voice=self.config.speech.voice,
+                    speed=self.config.speech.speed,
+                    lang_code=self.config.speech.lang_code,
+                    interactive=is_foreground,
+                )
+
+            # Check transcription cleanup if enabled
+            if self.cleaner:
+                if not self.cleaner.ensure_ready():
+                    self.cleaner = None  # Disable on failure
+
+            print("Ready! Hold the hotkey and speak.")
+            print()
+
+            # Start TTS socket server
+            tts_thread = threading.Thread(target=self._run_tts_server, daemon=True)
+            tts_thread.start()
+            print(f"TTS server listening on {TTS_SOCK_PATH}")
+
+            # Start hotkey listener on background thread
+            self.hotkey_listener.start()
+
+            # Startup complete
+            _play_cue([440, 660, 880])
+            if overlay_cfg.enabled:
+                overlay.show_flash("Claude Voice Started")
 
         if overlay_cfg.enabled:
+            # Run startup in background so Cocoa run loop can drive overlay animations
+            threading.Thread(target=_finish_startup, daemon=True).start()
+
             # Run Cocoa run loop on main thread (required for NSWindow)
             # Manual run loop instead of NSApplication.run() because the
             # latter overrides Python's SIGINT handler, breaking Ctrl+C.
@@ -552,7 +530,8 @@ class VoiceDaemon:
                     NSDate.dateWithTimeIntervalSinceNow_(0.2)
                 )
         else:
-            # No overlay — block on hotkey listener as before
+            # No overlay — run startup synchronously
+            _finish_startup()
             try:
                 self.hotkey_listener.join()
             except KeyboardInterrupt:
