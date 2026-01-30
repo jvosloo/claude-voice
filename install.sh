@@ -212,7 +212,7 @@ if [ "$IS_UPDATE" = true ]; then
 else
     _spin_run "Installing Python dependencies" pip install --upgrade pip -q
 fi
-_spin_run "Installing core dependencies" pip install --upgrade --only-binary av pynput sounddevice pyyaml mlx-audio "misaki<0.8" num2words phonemizer spacy espeakng-loader -q
+_spin_run "Installing core dependencies" pip install --upgrade --only-binary av pynput sounddevice pyyaml mlx-audio "misaki<0.8" num2words phonemizer spacy espeakng-loader pyobjc-framework-Cocoa pyobjc-framework-Quartz -q
 _spin_run "Downloading spacy English model" python3 -m spacy download en_core_web_sm --no-cache-dir -q
 
 # Migrate Piper TTS config to Kokoro (must run after venv + deps are installed)
