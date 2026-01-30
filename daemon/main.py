@@ -134,6 +134,12 @@ class VoiceDaemon:
         self._interrupted_tts = False
         self.afk = AfkManager(self.config)
 
+        # AFK hotkey (separate from push-to-talk)
+        self._afk_hotkey_listener = None
+        afk_hotkey = self.config.afk.hotkey
+        if afk_hotkey and "+" in afk_hotkey:
+            self._setup_afk_hotkey(afk_hotkey)
+
         # Optional transcription cleanup via LLM
         self.cleaner = None
         if self.config.input.transcription_cleanup:
@@ -230,6 +236,59 @@ class VoiceDaemon:
         self.afk.deactivate()
         _write_mode(previous)
         print(f"Restored {previous} mode")
+
+    def _setup_afk_hotkey(self, hotkey_str: str) -> None:
+        """Set up AFK hotkey listener for modifier+key combos."""
+        from pynput import keyboard as kb
+
+        parts = hotkey_str.split("+")
+        if len(parts) != 2:
+            print(f"AFK hotkey: unsupported format '{hotkey_str}' (expected modifier+key)")
+            return
+
+        from daemon.hotkey import KEY_MAP
+        modifier_name, key_char = parts[0], parts[1]
+        modifier = KEY_MAP.get(modifier_name)
+        if not modifier:
+            print(f"AFK hotkey: unknown modifier '{modifier_name}'")
+            return
+
+        pressed_keys = set()
+
+        def on_press(key):
+            pressed_keys.add(key)
+            try:
+                if key == modifier:
+                    return
+                if hasattr(key, 'char') and key.char == key_char and modifier in pressed_keys:
+                    self._toggle_afk()
+            except AttributeError:
+                pass
+
+        def on_release(key):
+            pressed_keys.discard(key)
+
+        self._afk_hotkey_listener = kb.Listener(on_press=on_press, on_release=on_release)
+        self._afk_hotkey_listener.start()
+
+    def _toggle_afk(self) -> None:
+        """Toggle AFK mode on/off."""
+        if self.afk.active:
+            self._exit_afk()
+            _play_cue([880, 660, 440])
+            print("AFK mode deactivated")
+        else:
+            if not self.afk.is_configured:
+                print("AFK mode: Telegram not configured")
+                return
+            self.afk._previous_mode = _read_mode()
+            _write_mode("afk")
+            if self.afk.activate(on_deactivate=self._exit_afk):
+                _play_cue([440, 660, 880])
+                print("AFK mode activated")
+            else:
+                _write_mode(self.afk._previous_mode or "notify")
+                print("AFK mode: failed to connect to Telegram")
 
     def _run_tts_server(self) -> None:
         """Run Unix socket server for TTS requests from the hook."""
@@ -368,6 +427,8 @@ class VoiceDaemon:
         if os.path.exists(TTS_SOCK_PATH):
             os.unlink(TTS_SOCK_PATH)
         self.hotkey_listener.stop()
+        if self._afk_hotkey_listener:
+            self._afk_hotkey_listener.stop()
         self.recorder.shutdown()
 
         # Cocoa run loop exits via self._shutting_down flag
