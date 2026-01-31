@@ -219,7 +219,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `base.en` | ~150MB | Fast | Good | Balanced |
 | `small.en` | ~500MB | Medium | Better | Recommended |
 | `medium.en` | ~1.5GB | Slower | Great | High accuracy |
-| `large-v3` | ~3GB | Slowest | Best | MLX recommended for this |
+| `large-v3` | ~3GB | Slowest | Best | Default, MLX recommended |
 
 **Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast.
 
