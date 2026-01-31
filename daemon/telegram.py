@@ -5,6 +5,17 @@ import requests
 import threading
 import time
 
+# Timeouts (seconds)
+REQUEST_TIMEOUT = 10       # standard API calls (verify, send_message)
+REQUEST_TIMEOUT_SHORT = 5  # lightweight calls (answer, delete, edit)
+POLL_TIMEOUT = 10          # Telegram long-polling hold time
+POLL_SOCKET_TIMEOUT = 15   # must exceed POLL_TIMEOUT
+
+# Polling resilience
+MAX_POLL_ERRORS = 5        # consecutive errors before stopping
+MAX_BACKOFF = 30           # exponential backoff cap
+
+
 class TelegramClient:
     """Minimal Telegram Bot API client using direct HTTP calls."""
 
@@ -21,7 +32,7 @@ class TelegramClient:
     def verify(self) -> bool:
         """Verify bot token and chat_id work. Returns True on success."""
         try:
-            resp = requests.get(f"{self._base_url}/getMe", timeout=10)
+            resp = requests.get(f"{self._base_url}/getMe", timeout=REQUEST_TIMEOUT)
             return resp.status_code == 200 and resp.json().get("ok", False)
         except Exception:
             return False
@@ -39,7 +50,7 @@ class TelegramClient:
             resp = requests.post(
                 f"{self._base_url}/sendMessage",
                 json=payload,
-                timeout=10,
+                timeout=REQUEST_TIMEOUT,
             )
             data = resp.json()
             if data.get("ok"):
@@ -54,7 +65,7 @@ class TelegramClient:
             requests.post(
                 f"{self._base_url}/answerCallbackQuery",
                 json={"callback_query_id": callback_query_id, "text": text},
-                timeout=5,
+                timeout=REQUEST_TIMEOUT_SHORT,
             )
         except Exception:
             pass
@@ -65,7 +76,7 @@ class TelegramClient:
             resp = requests.post(
                 f"{self._base_url}/deleteMessage",
                 json={"chat_id": self.chat_id, "message_id": message_id},
-                timeout=5,
+                timeout=REQUEST_TIMEOUT_SHORT,
             )
             return resp.json().get("ok", False)
         except Exception:
@@ -85,7 +96,7 @@ class TelegramClient:
             requests.post(
                 f"{self._base_url}/editMessageReplyMarkup",
                 json=payload,
-                timeout=5,
+                timeout=REQUEST_TIMEOUT_SHORT,
             )
         except Exception:
             pass
@@ -102,7 +113,7 @@ class TelegramClient:
         """Stop the polling loop."""
         self._polling = False
         if self._poll_thread:
-            self._poll_thread.join(timeout=5)
+            self._poll_thread.join(timeout=REQUEST_TIMEOUT_SHORT)
             self._poll_thread = None
 
     def _poll_loop(self) -> None:
@@ -112,17 +123,17 @@ class TelegramClient:
             try:
                 resp = requests.get(
                     f"{self._base_url}/getUpdates",
-                    params={"offset": self._offset, "timeout": 10},
-                    timeout=15,
+                    params={"offset": self._offset, "timeout": POLL_TIMEOUT},
+                    timeout=POLL_SOCKET_TIMEOUT,
                 )
                 data = resp.json()
                 if not data.get("ok"):
                     consecutive_errors += 1
-                    if consecutive_errors >= 5:
+                    if consecutive_errors >= MAX_POLL_ERRORS:
                         print("Telegram: too many polling errors, stopping")
                         self._polling = False
                         break
-                    time.sleep(min(2 ** consecutive_errors, 30))
+                    time.sleep(min(2 ** consecutive_errors, MAX_BACKOFF))
                     continue
 
                 consecutive_errors = 0
@@ -138,7 +149,7 @@ class TelegramClient:
                     print(f"Telegram: polling failed: {e}")
                     self._polling = False
                     break
-                time.sleep(min(2 ** consecutive_errors, 30))
+                time.sleep(min(2 ** consecutive_errors, MAX_BACKOFF))
 
     def _handle_update(self, update: dict) -> None:
         """Route an incoming update to the appropriate handler."""

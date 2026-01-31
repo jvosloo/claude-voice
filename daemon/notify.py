@@ -148,7 +148,8 @@ def regenerate_custom_phrases(
             audio = mx.concatenate(chunks)
             audio_np = np.array(audio, dtype=np.float32)
             out_path = os.path.join(_CACHE_DIR, f"{cat}.wav")
-            sf.write(out_path, audio_np, 24000)
+            from daemon.tts import SAMPLE_RATE
+            sf.write(out_path, audio_np, SAMPLE_RATE)
             print(f'  Generated: {cat} -> "{text}"')
 
         # Update meta

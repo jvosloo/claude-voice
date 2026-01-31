@@ -43,6 +43,14 @@ MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
 ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 
+# Audio cue frequency patterns
+CUE_ASCENDING = [440, 660, 880]
+CUE_DESCENDING = [880, 660, 440]
+CUE_REC_START = [440, 880]
+CUE_REC_STOP = [880, 440]
+CUE_FADE = 0.005   # fade in/out per tone (seconds)
+CUE_VOLUME = 0.3   # amplitude multiplier
+
 _cue_stream: sd.OutputStream | None = None
 _cue_lock = threading.Lock()
 
@@ -76,12 +84,12 @@ def _play_cue(frequencies: list[int], duration: float = 0.05, sample_rate: int =
         for freq in frequencies:
             t = np.linspace(0, duration, int(sample_rate * duration), False)
             tone = np.sin(2 * np.pi * freq * t)
-            fade_samples = int(sample_rate * 0.005)  # 5ms fade
+            fade_samples = int(sample_rate * CUE_FADE)
             tone[:fade_samples] *= np.linspace(0, 1, fade_samples)
             tone[-fade_samples:] *= np.linspace(1, 0, fade_samples)
             samples.append(tone)
 
-        audio = np.concatenate(samples).astype(np.float32) * 0.3
+        audio = np.concatenate(samples).astype(np.float32) * CUE_VOLUME
 
         with _cue_lock:
             if _cue_stream is None or not _cue_stream.active:
@@ -149,6 +157,7 @@ class VoiceDaemon:
         """Called when language is cycled."""
         code = lang.upper()
         print(f"Language: {code}")
+        _play_cue(CUE_ASCENDING)
         from daemon import overlay
         overlay.show_language_flash(code)
 
@@ -157,7 +166,7 @@ class VoiceDaemon:
         # Start recording FIRST - minimize latency
         self.recorder.start()
         # Play ascending cue to signal recording started
-        _play_cue([440, 880])
+        _play_cue(CUE_REC_START)
         print("Recording...")
         # Show language label on overlay if not default language
         lang = self.hotkey_listener.active_language
@@ -223,7 +232,7 @@ class VoiceDaemon:
         self.afk._previous_mode = _read_mode()
         _write_mode("afk")
         if self.afk.activate():
-            _play_cue([440, 660, 880])  # Ascending triple-tone
+            _play_cue(CUE_ASCENDING)
             overlay.show_flash("AFK")
             print("AFK mode activated")
         else:
@@ -238,7 +247,7 @@ class VoiceDaemon:
         previous = self.afk._previous_mode or "notify"
         self.afk.deactivate()
         _write_mode(previous)
-        _play_cue([880, 660, 440])  # Descending triple-tone
+        _play_cue(CUE_DESCENDING)
         overlay.show_flash("AFK OFF")
         print(f"AFK mode deactivated, restored {previous} mode")
 
@@ -329,7 +338,7 @@ class VoiceDaemon:
 
         audio = self.recorder.stop()
         # Play descending cue to signal recording stopped
-        _play_cue([880, 440])
+        _play_cue(CUE_REC_STOP)
         duration = self.recorder.get_duration(audio)
 
         if duration < self.config.input.min_audio_length:
@@ -528,7 +537,7 @@ class VoiceDaemon:
             self.hotkey_listener.start()
 
             # Startup complete
-            _play_cue([440, 660, 880])
+            _play_cue(CUE_ASCENDING)
             if overlay_cfg.enabled:
                 overlay.show_flash("Claude Voice Started")
 

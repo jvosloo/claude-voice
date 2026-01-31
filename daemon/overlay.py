@@ -52,6 +52,12 @@ BAR_MAX_H = 20
 # Each bar oscillates at a different speed for organic movement
 BAR_SPEEDS = [2.7, 3.4, 2.1, 3.9, 2.5, 3.1, 2.8]
 
+# Text
+FONT_SIZE_LARGE = 18.0   # flash labels, loading text
+FONT_SIZE_SMALL = 11.0   # language badge during recording
+FONT_WEIGHT = 0.23       # semi-light weight for large text
+FLASH_DURATION = 1.0     # seconds before flash auto-fades
+
 # Typing dots (transcribing)
 NUM_DOTS = 3
 DOT_RADIUS = 4
@@ -197,8 +203,8 @@ if PYOBJC_AVAILABLE:
             """Draw language code text centered in the pill."""
             from AppKit import NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSString
             text = NSString.stringWithString_(self._label)
-            font_size = 18.0 if large else 11.0
-            font = NSFont.systemFontOfSize_weight_(font_size, 0.23) if large else NSFont.boldSystemFontOfSize_(font_size)
+            font_size = FONT_SIZE_LARGE if large else FONT_SIZE_SMALL
+            font = NSFont.systemFontOfSize_weight_(font_size, FONT_WEIGHT) if large else NSFont.boldSystemFontOfSize_(font_size)
             attrs = {
                 NSFontAttributeName: font,
                 NSForegroundColorAttributeName: self._fg_color.colorWithAlphaComponent_(0.95),
@@ -215,7 +221,7 @@ if PYOBJC_AVAILABLE:
             """Draw text label with animated bouncing dots."""
             from AppKit import NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSString
             text = NSString.stringWithString_(self._label)
-            font = NSFont.systemFontOfSize_weight_(16.0, 0.23)
+            font = NSFont.systemFontOfSize_weight_(FONT_SIZE_LARGE, FONT_WEIGHT)
             color = self._fg_color.colorWithAlphaComponent_(0.95)
             attrs = {
                 NSFontAttributeName: font,
@@ -424,7 +430,7 @@ if PYOBJC_AVAILABLE:
             self._pill_view.setLabel_(text)
             self._pill_view.setForegroundColor_(NSColor.whiteColor())
             self._pill_view.setMode_("loading_flash")
-            self._resize_pill(text, font_size=16.0, padding=66)
+            self._resize_pill(text, padding=66)
             self._window.setAlphaValue_(1.0)
             self._start_anim()
 
@@ -440,7 +446,7 @@ if PYOBJC_AVAILABLE:
             self._resize_pill(text)
             self._window.setAlphaValue_(1.0)
             self._fade_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                2.2, self, "fadeOut:", None, False
+                FLASH_DURATION, self, "fadeOut:", None, False
             )
 
         def doShowLanguageFlash_(self, lang_code):
@@ -453,14 +459,14 @@ if PYOBJC_AVAILABLE:
             self._pill_view.setMode_("language_flash")
             self._window.setAlphaValue_(1.0)
             self._fade_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                1.5, self, "fadeOut:", None, False
+                FLASH_DURATION, self, "fadeOut:", None, False
             )
 
-        def _resize_pill(self, text, font_size=18.0, padding=40):
+        def _resize_pill(self, text, font_size=FONT_SIZE_LARGE, padding=40):
             """Resize the pill window width to fit the given text, centered on screen."""
             from AppKit import NSFont, NSFontAttributeName, NSString
             ns_text = NSString.stringWithString_(text)
-            font = NSFont.systemFontOfSize_weight_(font_size, 0.23)
+            font = NSFont.systemFontOfSize_weight_(font_size, FONT_WEIGHT)
             text_width = ns_text.sizeWithAttributes_({NSFontAttributeName: font}).width
             new_width = max(PILL_WIDTH, text_width + padding)
             self._set_pill_width(new_width)

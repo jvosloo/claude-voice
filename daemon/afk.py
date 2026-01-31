@@ -12,6 +12,9 @@ from daemon.telegram import TelegramClient, make_options_keyboard, make_permissi
 # Response files directory
 RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
 
+# Telegram message limit (4096 max, reserve space for header/buttons/HTML)
+TELEGRAM_MAX_CHARS = 3900
+
 class PendingRequest:
     """A request from a hook waiting for a Telegram response."""
 
@@ -139,9 +142,7 @@ class AfkManager:
             # Use last known context as fallback (e.g. permission prompts lack context)
             display_context = self._session_contexts[session]
 
-        # Build Telegram message — Telegram limit is 4096 chars;
-        # reserve 200 for header / buttons / HTML overhead.
-        max_chars = 3900
+        max_chars = TELEGRAM_MAX_CHARS
         lines = [f"<b>[{session}]</b>"]
         if display_context:
             context_text = display_context.strip()
