@@ -110,3 +110,53 @@ class TestRequestQueuePriorityJump:
         assert queue.get_active() == req3
         # Queue should now be: req2, req4, req1 (old active moved to end)
         assert queue.size() == 3
+
+
+class TestRequestQueueSessionMetadata:
+
+    def test_get_session_emoji_deterministic(self):
+        """Same session always gets same emoji."""
+        queue = RequestQueue()
+
+        emoji1 = queue.get_session_emoji("test-session")
+        emoji2 = queue.get_session_emoji("test-session")
+
+        assert emoji1 == emoji2
+        assert emoji1 in ["🟢", "🔵", "🟡", "🔴", "🟣"]
+
+    def test_different_sessions_may_differ(self):
+        """Different sessions may get different emoji (hash-based)."""
+        queue = RequestQueue()
+
+        emoji_a = queue.get_session_emoji("session-a")
+        emoji_b = queue.get_session_emoji("session-b")
+
+        # They're both valid emoji
+        assert emoji_a in ["🟢", "🔵", "🟡", "🔴", "🟣"]
+        assert emoji_b in ["🟢", "🔵", "🟡", "🔴", "🟣"]
+
+    def test_get_queue_summary_with_active_and_queue(self):
+        """Summary includes active and queued requests with metadata."""
+        queue = RequestQueue()
+        req1 = QueuedRequest("sess-a", "permission", "Test 1", "/tmp/r1")
+        req2 = QueuedRequest("sess-b", "input", "Test 2", "/tmp/r2")
+        req3 = QueuedRequest("sess-a", "ask_user_question", "Test 3", "/tmp/r3")
+        queue.enqueue(req1)
+        queue.enqueue(req2)
+        queue.enqueue(req3)
+
+        summary = queue.get_queue_summary()
+
+        assert len(summary) == 3
+        assert summary[0]['session'] == 'sess-a'
+        assert summary[0]['status'] == 'active'
+        assert summary[0]['position'] == 0
+        assert 'emoji' in summary[0]
+
+        assert summary[1]['session'] == 'sess-b'
+        assert summary[1]['status'] == 'queued'
+        assert summary[1]['position'] == 1
+
+        assert summary[2]['session'] == 'sess-a'
+        assert summary[2]['status'] == 'queued'
+        assert summary[2]['position'] == 2

@@ -22,6 +22,8 @@ class QueuedRequest:
 class RequestQueue:
     """FIFO queue with skip and priority jump capabilities."""
 
+    EMOJI_LIST = ["🟢", "🔵", "🟡", "🔴", "🟣"]
+
     def __init__(self):
         self._queue = []  # List of QueuedRequest
         self._active = None  # Currently displayed request
@@ -84,3 +86,44 @@ class RequestQueue:
 
         # Not found in queue
         return None
+
+    def get_session_emoji(self, session: str) -> str:
+        """Get deterministic emoji for session based on name hash."""
+        if session not in self._session_metadata:
+            # Assign emoji based on hash of session name
+            emoji_index = hash(session) % len(self.EMOJI_LIST)
+            self._session_metadata[session] = {
+                'emoji': self.EMOJI_LIST[emoji_index],
+                'first_seen': time.time(),
+            }
+        return self._session_metadata[session]['emoji']
+
+    def get_queue_summary(self) -> list[dict]:
+        """Return list of all requests (active + queued) with metadata."""
+        summary = []
+
+        if self._active:
+            summary.append({
+                'request': self._active,
+                'session': self._active.session,
+                'req_type': self._active.req_type,
+                'prompt': self._active.prompt,
+                'status': 'active',
+                'position': 0,
+                'emoji': self.get_session_emoji(self._active.session),
+                'waiting_seconds': int(time.time() - self._active.timestamp),
+            })
+
+        for i, req in enumerate(self._queue, start=1):
+            summary.append({
+                'request': req,
+                'session': req.session,
+                'req_type': req.req_type,
+                'prompt': req.prompt,
+                'status': 'queued',
+                'position': i,
+                'emoji': self.get_session_emoji(req.session),
+                'waiting_seconds': int(time.time() - req.timestamp),
+            })
+
+        return summary
