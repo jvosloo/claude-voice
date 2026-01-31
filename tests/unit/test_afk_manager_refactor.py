@@ -47,3 +47,32 @@ class TestAfkManagerQueueIntegration:
 
         # Verify presenter was called
         afk._presenter.send_to_session.assert_called_once()
+
+
+class TestAfkManagerCallbackRouting:
+
+    def test_handle_callback_routes_via_queue_router(self):
+        """Callback query routes through QueueRouter to active request."""
+        config = _make_config()
+
+        afk = AfkManager(config)
+        afk.active = True
+        afk._client = Mock()
+        afk._router = Mock()
+        afk._presenter = Mock()
+
+        # Mock active request
+        from daemon.request_queue import QueuedRequest
+        active_req = QueuedRequest("sess1", "permission", "Test", "/tmp/r1")
+        active_req.message_id = 123
+        afk._router.route_button_press = Mock(return_value=active_req)
+
+        # Mock queue operations
+        afk._queue = Mock()
+        afk._queue.dequeue_active = Mock(return_value=None)
+
+        # Handle callback
+        afk._handle_callback("callback_123", "yes", 123)
+
+        # Verify routing was used
+        afk._router.route_button_press.assert_called_once_with("yes", 123)

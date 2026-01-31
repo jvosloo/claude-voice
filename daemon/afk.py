@@ -218,8 +218,8 @@ class AfkManager:
         """Handle an inline button press from Telegram."""
         self._client.answer_callback(callback_id, text=f"Sent: {data}")
 
-        with self._pending_lock:
-            pending = self._pending.pop(message_id, None)
+        # Route via QueueRouter
+        pending = self._router.route_button_press(data, message_id)
 
         if not pending:
             return
@@ -227,14 +227,29 @@ class AfkManager:
         # Remove buttons from the message
         self._client.edit_message_reply_markup(message_id)
 
+        # Handle commands (skip, show queue)
+        if data.startswith("cmd:"):
+            self._handle_queue_command(data[4:])
+            return
+
         # Write response for the hook
         self._write_response(pending.response_path, data)
+
+        # Send confirmation
+        self._send_confirmation(pending.session, data)
+
+        # Advance queue
+        next_req = self._queue.dequeue_active()
+        if next_req:
+            self._present_active_request()
+        else:
+            self._presenter.send_to_session(pending.session, "✅ All requests handled!")
 
     def _handle_message(self, text: str) -> None:
         """Handle a text message from Telegram."""
         cmd = text.strip().lower()
 
-        # Commands that work regardless of AFK state
+        # Handle commands (work regardless of AFK state)
         if cmd == "/afk":
             if self._on_toggle:
                 self._on_toggle()
@@ -247,7 +262,7 @@ class AfkManager:
                 else:
                     self.deactivate()
             else:
-                self._send("Not in AFK mode. Send /afk to activate.")
+                self._presenter.send_to_session("", "Not in AFK mode. Send /afk to activate.")
             return
 
         if cmd == "/status":
@@ -258,48 +273,51 @@ class AfkManager:
             self._handle_clear()
             return
 
-        # When not in AFK mode, ignore non-command messages
-        if not self.active:
-            self._send("Not in AFK mode. Send /afk to activate.")
+        if cmd == "/queue":
+            self._send_queue_summary()
             return
 
-        # Route text reply to the best pending request.
-        # Priority: ask_user_question > input > any (permission last)
-        with self._pending_lock:
-            target = None
-            by_recency = sorted(
-                self._pending.items(), key=lambda x: x[1].timestamp, reverse=True
-            )
-            # First: ask_user_question (accepts free-text via "Other")
-            for msg_id, pending in by_recency:
-                if pending.req_type == "ask_user_question":
-                    target = (msg_id, pending)
-                    break
-            # Then: generic input
-            if not target:
-                for msg_id, pending in by_recency:
-                    if pending.req_type == "input":
-                        target = (msg_id, pending)
-                        break
-            # Fallback: any pending request
-            if not target:
-                for msg_id, pending in by_recency:
-                    target = (msg_id, pending)
-                    break
+        if cmd == "/skip":
+            self._handle_queue_command("skip")
+            return
 
-            if target:
-                msg_id, pending = target
-                del self._pending[msg_id]
+        # Not in AFK mode
+        if not self.active:
+            self._presenter.send_to_session("", "Not in AFK mode. Send /afk to activate.")
+            return
 
-        if target:
-            msg_id, pending = target
-            self._write_response(pending.response_path, text)
-            self._send(
-                f"Sent to [{pending.session}]: {_escape_html(text)}"
-            )
-        else:
-            # No pending request — type directly into the terminal prompt
+        # Route text to active request
+        pending = self._router.route_text_message(text)
+
+        if not pending:
+            self._presenter.send_to_session("", "No active request. Queue is empty.")
+            return
+
+        # For permission requests, treat text as a question/comment
+        if pending.req_type == "permission":
             self._type_into_terminal(text)
+            self._presenter.send_to_session(
+                pending.session,
+                f"💬 Sent question to [{pending.session}]: {_escape_html(text)}\n\n"
+                "Permission will be re-requested after Claude responds."
+            )
+            # Deny this permission request (user wants more info)
+            self._write_response(pending.response_path, "deny_for_question")
+            # Dequeue and present next
+            next_req = self._queue.dequeue_active()
+            if next_req:
+                self._present_active_request()
+        else:
+            # Normal text response
+            self._write_response(pending.response_path, text)
+            self._send_confirmation(pending.session, text)
+
+            # Advance queue
+            next_req = self._queue.dequeue_active()
+            if next_req:
+                self._present_active_request()
+            else:
+                self._presenter.send_to_session(pending.session, "✅ All requests handled!")
 
     def _present_active_request(self) -> None:
         """Present the active request to user."""
@@ -349,6 +367,31 @@ class AfkManager:
 
         text = self._presenter.format_queued_notification(req, queue_info)
         self._presenter.send_to_session(req.session, text)
+
+    def _send_confirmation(self, session: str, data: str) -> None:
+        """Send confirmation that response was sent."""
+        emoji = self._queue.get_session_emoji(session)
+        text = f"✓ Sent to {emoji} [{session}]: {_escape_html(data)}"
+        self._presenter.send_to_session(session, text)
+
+    def _handle_queue_command(self, cmd: str) -> None:
+        """Handle queue management commands (skip, show_queue)."""
+        if cmd == "skip":
+            next_req = self._queue.skip_active()
+            if next_req:
+                self._presenter.send_to_session(
+                    next_req.session,
+                    "⏭️ Skipped. Next request:"
+                )
+                self._present_active_request()
+
+        elif cmd == "show_queue":
+            self._send_queue_summary()
+
+    def _send_queue_summary(self) -> None:
+        """Send full queue summary to user."""
+        # Placeholder for Task 7
+        self._presenter.send_to_session("", "Queue summary coming in Task 7")
 
     def _type_into_terminal(self, text: str) -> None:
         """Type text into the terminal prompt via a background subprocess."""
