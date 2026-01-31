@@ -61,8 +61,6 @@ class AudioConfig:
 class OverlayConfig:
     enabled: bool = True
     style: str = "dark"  # "dark", "frosted", or "colored"
-    recording_color: str = "#34C759"
-    transcribing_color: str = "#A855F7"
 
 @dataclass
 class AfkTelegramConfig:

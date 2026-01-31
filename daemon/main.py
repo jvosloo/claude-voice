@@ -246,19 +246,10 @@ class VoiceDaemon:
             self.cleaner = None
             changed.append("cleaner(disabled)")
 
-        # Overlay: re-init if colors or style changed
-        overlay_changed = (
-            new.overlay.recording_color != old.overlay.recording_color
-            or new.overlay.transcribing_color != old.overlay.transcribing_color
-            or new.overlay.style != old.overlay.style
-        )
-        if overlay_changed and new.overlay.enabled:
+        # Overlay: re-init if style changed
+        if new.overlay.style != old.overlay.style and new.overlay.enabled:
             from daemon import overlay
-            overlay.init(
-                recording_color=new.overlay.recording_color,
-                transcribing_color=new.overlay.transcribing_color,
-                style=new.overlay.style,
-            )
+            overlay.update_style(style=new.overlay.style)
             changed.append("overlay")
 
         # Notify phrases: regenerate if voice/speed/lang_code changed
@@ -617,11 +608,7 @@ class VoiceDaemon:
         overlay_cfg = self.config.overlay
         if overlay_cfg.enabled:
             from daemon import overlay
-            overlay.init(
-                recording_color=overlay_cfg.recording_color,
-                transcribing_color=overlay_cfg.transcribing_color,
-                style=overlay_cfg.style,
-            )
+            overlay.init(style=overlay_cfg.style)
 
         # Interactive prompts run on main thread BEFORE Cocoa steals focus
         is_foreground = sys.stdin.isatty()

@@ -85,6 +85,18 @@ class ControlServer:
                 ).start()
             return {"ok": True}
 
+        if cmd == "preview_overlay":
+            from daemon import overlay
+            import time
+            def _preview():
+                overlay.show_recording()
+                time.sleep(1.5)
+                overlay.show_transcribing()
+                time.sleep(1.0)
+                overlay.hide()
+            threading.Thread(target=_preview, daemon=True).start()
+            return {"ok": True}
+
         if cmd == "stop":
             threading.Thread(target=self.daemon._shutdown, daemon=True).start()
             return {"ok": True}

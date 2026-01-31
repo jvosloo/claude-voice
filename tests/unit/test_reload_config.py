@@ -329,23 +329,6 @@ class TestReloadCleaner:
 
 class TestReloadOverlay:
 
-    def test_color_change_reinits_overlay(self):
-        old_cfg = _default_config(overlay=OverlayConfig(enabled=True))
-        d = _make_daemon(old_cfg)
-        new_cfg = _default_config(
-            overlay=OverlayConfig(enabled=True, recording_color="#FF0000"),
-        )
-
-        with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.overlay.init") as mock_init:
-            d.reload_config()
-
-        mock_init.assert_called_once_with(
-            recording_color="#FF0000",
-            transcribing_color="#A855F7",
-            style="dark",
-        )
-
     def test_style_change_reinits_overlay(self):
         old_cfg = _default_config(overlay=OverlayConfig(enabled=True))
         d = _make_daemon(old_cfg)
@@ -354,33 +337,33 @@ class TestReloadOverlay:
         )
 
         with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.overlay.init") as mock_init:
+             patch("daemon.overlay.update_style") as mock_update:
             d.reload_config()
 
-        mock_init.assert_called_once()
+        mock_update.assert_called_once_with(style="frosted")
 
     def test_overlay_disabled_skips_reinit(self):
         old_cfg = _default_config(overlay=OverlayConfig(enabled=False))
         d = _make_daemon(old_cfg)
         new_cfg = _default_config(
-            overlay=OverlayConfig(enabled=False, recording_color="#FF0000"),
+            overlay=OverlayConfig(enabled=False, style="frosted"),
         )
 
         with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.overlay.init") as mock_init:
+             patch("daemon.overlay.update_style") as mock_update:
             d.reload_config()
 
-        mock_init.assert_not_called()
+        mock_update.assert_not_called()
 
     def test_unchanged_overlay_not_reinited(self):
         old_cfg = _default_config(overlay=OverlayConfig(enabled=True))
         d = _make_daemon(old_cfg)
 
         with patch("daemon.main.load_config", return_value=deepcopy(old_cfg)), \
-             patch("daemon.overlay.init") as mock_init:
+             patch("daemon.overlay.update_style") as mock_update:
             d.reload_config()
 
-        mock_init.assert_not_called()
+        mock_update.assert_not_called()
 
 
 class TestReloadAfk:

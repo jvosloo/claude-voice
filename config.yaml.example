@@ -20,9 +20,9 @@ speech:
   enabled: true                # Set to false to disable TTS output
   mode: "notify"               # "notify" = short status phrases, "narrate" = read full response
   # Notify mode settings
-  # notify_phrases:              # Customize status phrases (remove or match default to use shipped audio)
-  #   permission: "Permission needed"
-  #   done: "Ready for input"
+  notify_phrases:
+    permission: "Permission needed"
+    done: "Ready for input"
   voice: "af_heart"            # Kokoro voice ID (see README for full list)
   speed: 1.0                   # Playback speed (1.0 = normal)
   lang_code: "a"               # Language: a=American, b=British, j=Japanese, z=Chinese, e=Spanish, f=French
@@ -37,8 +37,6 @@ audio:
 overlay:
   enabled: true                # Show visual indicator during recording/transcription
   style: "dark"                # "dark" = dark HUD, "frosted" = blur glass, "colored" = solid color pills
-  recording_color: "#34C759"   # Green (bars on dark/frosted, background on colored)
-  transcribing_color: "#A855F7" # Purple (dots on dark/frosted, background on colored)
 
 # AFK Mode (Telegram) - receive notifications on your phone when away
 # afk:

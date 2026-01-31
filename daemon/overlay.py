@@ -24,13 +24,6 @@ except ImportError:
     PYOBJC_AVAILABLE = False
 
 
-def _hex_to_nscolor(hex_str: str, alpha: float = 1.0):
-    """Convert '#RRGGBB' to NSColor."""
-    h = hex_str.lstrip("#")
-    r, g, b = (int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))
-    return NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, alpha)
-
-
 # Pill dimensions (points)
 PILL_WIDTH = 120
 PILL_HEIGHT = 36
@@ -219,6 +212,14 @@ if PYOBJC_AVAILABLE:
     class OverlayController(NSObject):
         """Controls the floating overlay window. All public methods are thread-safe."""
 
+        # Fixed accent colors
+        RECORDING_COLOR = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+            0x34 / 255.0, 0xC7 / 255.0, 0x59 / 255.0, 1.0  # #34C759
+        )
+        TRANSCRIBING_COLOR = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+            0xA8 / 255.0, 0x55 / 255.0, 0xF7 / 255.0, 1.0  # #A855F7
+        )
+
         def init(self):
             self = objc.super(OverlayController, self).init()
             if self is None:
@@ -229,17 +230,9 @@ if PYOBJC_AVAILABLE:
             self._anim_phase = 0.0
             self._state = "idle"  # idle, recording, transcribing, language_flash
             self._style = "dark"
-            self._recording_color = None
-            self._transcribing_color = None
             self._fade_timer = None
+            self._effect_view = None
             return self
-
-        def setStyle_(self, style):
-            self._style = style
-
-        def setColors_transcribing_(self, recording_color, transcribing_color):
-            self._recording_color = recording_color
-            self._transcribing_color = transcribing_color
 
         def setup(self):
             """Create the overlay window. Must be called on the main thread."""
@@ -279,17 +272,8 @@ if PYOBJC_AVAILABLE:
 
             # Frosted style: add NSVisualEffectView as background layer
             if self._style == "frosted":
-                effect_view = NSVisualEffectView.alloc().initWithFrame_(pill_rect)
-                # NSVisualEffectMaterialHUDWindow = 13
-                effect_view.setMaterial_(13)
-                # NSVisualEffectBlendingModeBehindWindow = 0
-                effect_view.setBlendingMode_(0)
-                # NSVisualEffectStateActive = 1
-                effect_view.setState_(1)
-                effect_view.setWantsLayer_(True)
-                effect_view.layer().setCornerRadius_(PILL_RADIUS)
-                effect_view.layer().setMasksToBounds_(True)
-                content.addSubview_(effect_view)
+                self._effect_view = self._create_effect_view(pill_rect)
+                content.addSubview_(self._effect_view)
 
             self._pill_view = _PillView.alloc().initWithFrame_(pill_rect)
             self._pill_view.setStyle_(self._style)
@@ -302,7 +286,46 @@ if PYOBJC_AVAILABLE:
             if self._style == "colored" or state == "transcribing":
                 return NSColor.whiteColor()
             # dark / frosted recording: use the recording color as foreground
-            return self._recording_color
+            return self.RECORDING_COLOR
+
+        def _create_effect_view(self, frame):
+            """Create an NSVisualEffectView for frosted glass style."""
+            effect_view = NSVisualEffectView.alloc().initWithFrame_(frame)
+            effect_view.setMaterial_(13)  # NSVisualEffectMaterialHUDWindow
+            effect_view.setBlendingMode_(0)  # NSVisualEffectBlendingModeBehindWindow
+            effect_view.setState_(1)  # NSVisualEffectStateActive
+            effect_view.setWantsLayer_(True)
+            effect_view.layer().setCornerRadius_(PILL_RADIUS)
+            effect_view.layer().setMasksToBounds_(True)
+            return effect_view
+
+        def update_style(self, style):
+            """Update overlay style. Thread-safe."""
+            self._style = style
+            if self._pill_view:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "doUpdateStyle:", style, False
+                )
+
+        def doUpdateStyle_(self, style):
+            """Main thread: update pill view style and manage frosted effect view."""
+            if not self._pill_view:
+                return
+            self._pill_view.setStyle_(style)
+
+            # Remove old frosted effect view if present
+            if self._effect_view:
+                self._effect_view.removeFromSuperview()
+                self._effect_view = None
+
+            # Add frosted effect view if switching to frosted
+            if style == "frosted" and self._window:
+                content = self._window.contentView()
+                self._effect_view = self._create_effect_view(self._pill_view.frame())
+                # Insert behind the pill view
+                content.addSubview_positioned_relativeTo_(
+                    self._effect_view, -1, self._pill_view  # NSWindowBelow = -1
+                )
 
         def show_recording(self, label=None):
             """Show pill with waveform animation. Thread-safe."""
@@ -332,9 +355,10 @@ if PYOBJC_AVAILABLE:
             """Main thread: show pill with waveform bars."""
             self._stop_anim()
             self._cancel_fade()
+            self._set_pill_width(PILL_WIDTH)
             self._state = "recording"
             self._pill_view.setLabel_(label)
-            self._pill_view.setBackgroundColor_(self._recording_color)
+            self._pill_view.setBackgroundColor_(self.RECORDING_COLOR)
             self._pill_view.setForegroundColor_(self._fg_color_for_state("recording"))
             self._pill_view.setMode_("recording")
             self._window.setAlphaValue_(1.0)
@@ -344,9 +368,10 @@ if PYOBJC_AVAILABLE:
             """Main thread: show pill with bouncing dots."""
             self._stop_anim()
             self._cancel_fade()
+            self._set_pill_width(PILL_WIDTH)
             self._state = "transcribing"
             self._pill_view.setLabel_(None)
-            self._pill_view.setBackgroundColor_(self._transcribing_color)
+            self._pill_view.setBackgroundColor_(self.TRANSCRIBING_COLOR)
             self._pill_view.setForegroundColor_(
                 self._fg_color_for_state("transcribing")
             )
@@ -357,6 +382,7 @@ if PYOBJC_AVAILABLE:
             """Main thread: hide the pill."""
             self._stop_anim()
             self._cancel_fade()
+            self._set_pill_width(PILL_WIDTH)
             self._state = "idle"
             self._pill_view.setLabel_(None)
             self._pill_view.setMode_("idle")
@@ -384,6 +410,7 @@ if PYOBJC_AVAILABLE:
             self._cancel_fade()
             self._state = "language_flash"
             self._pill_view.setLabel_(text)
+            self._pill_view.setBackgroundColor_(self.RECORDING_COLOR)
             self._pill_view.setForegroundColor_(NSColor.whiteColor())
             self._pill_view.setMode_("language_flash")
             # Resize pill width to fit text
@@ -399,6 +426,7 @@ if PYOBJC_AVAILABLE:
             self._cancel_fade()
             self._state = "language_flash"
             self._pill_view.setLabel_(lang_code)
+            self._pill_view.setBackgroundColor_(self.RECORDING_COLOR)
             self._pill_view.setForegroundColor_(NSColor.whiteColor())
             self._pill_view.setMode_("language_flash")
             self._window.setAlphaValue_(1.0)
@@ -426,6 +454,8 @@ if PYOBJC_AVAILABLE:
             self._window.setFrame_display_(frame, True)
             pill_rect = NSMakeRect(0, 0, width, PILL_HEIGHT)
             self._pill_view.setFrame_(pill_rect)
+            if self._effect_view:
+                self._effect_view.setFrame_(pill_rect)
 
         def fadeOut_(self, timer):
             """Timer callback: hide the pill after flash."""
@@ -465,28 +495,26 @@ if PYOBJC_AVAILABLE:
 _controller: "OverlayController | None" = None
 
 
-def init(
-    recording_color: str = "#34C759",
-    transcribing_color: str = "#A855F7",
-    style: str = "dark",
-):
+def init(style: str = "dark"):
     """Initialize the overlay. Must be called on the main thread."""
     global _controller
     if not PYOBJC_AVAILABLE:
         print("Warning: PyObjC not available, overlay disabled")
         return
     _controller = OverlayController.alloc().init()
-    _controller.setStyle_(style)
-    _controller.setColors_transcribing_(
-        _hex_to_nscolor(recording_color),
-        _hex_to_nscolor(transcribing_color),
-    )
+    _controller._style = style
     _controller.setup()
 
 
 def show_recording(label=None):
     if _controller:
         _controller.show_recording(label=label)
+
+
+def update_style(style="dark"):
+    """Update overlay style. Thread-safe (can be called from any thread)."""
+    if _controller:
+        _controller.update_style(style)
 
 
 def show_flash(text):
