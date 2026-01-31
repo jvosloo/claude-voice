@@ -98,10 +98,12 @@ def regenerate_custom_phrases(
     voice_changed = prev_voice_key != voice_key
 
     # Determine which phrases need regeneration
+    prev_phrases = prev_meta.get("phrases", {})
     needs_regen = {}
     for cat, text in all_phrases.items():
         cached = os.path.join(_CACHE_DIR, f"{cat}.wav")
-        if not os.path.exists(cached) or voice_changed:
+        text_changed = prev_phrases.get(cat) != text
+        if not os.path.exists(cached) or voice_changed or text_changed:
             needs_regen[cat] = text
 
     if not needs_regen:
@@ -115,7 +117,7 @@ def regenerate_custom_phrases(
         if answer in ("n", "no"):
             # Update meta so we don't ask again
             with open(_CACHE_META, "w") as f:
-                yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code}, f)
+                yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code, "phrases": dict(all_phrases)}, f)
             return
 
     # Generate with Kokoro
@@ -141,7 +143,7 @@ def regenerate_custom_phrases(
 
         # Update meta
         with open(_CACHE_META, "w") as f:
-            yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code}, f)
+            yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code, "phrases": dict(all_phrases)}, f)
 
         print("Notification phrases ready.")
     except Exception as e:
