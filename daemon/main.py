@@ -438,7 +438,11 @@ class VoiceDaemon:
         print("=" * 50)
 
         # Initialize mode from config (only if no mode file exists yet)
+        # Reset "afk" mode — AFK is never active at startup, so a stale
+        # mode file from a previous session must not persist.
         if not os.path.exists(MODE_FILE):
+            _write_mode(self.config.speech.mode)
+        elif _read_mode() == "afk":
             _write_mode(self.config.speech.mode)
         print(f"TTS mode: {_read_mode()}")
         if self.afk.is_configured:
