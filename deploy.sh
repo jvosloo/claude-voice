@@ -78,15 +78,22 @@ if [ $hooks_changed -eq 0 ]; then
     echo "  No hooks changes"
 fi
 
-# Check if daemon is running
+# Check if daemon is running (via pid file or process match)
 echo ""
-if pgrep -f "claude-voice-daemon" > /dev/null; then
+daemon_running=false
+if [ -f "$INSTALL_DIR/daemon.pid" ] && kill -0 "$(cat "$INSTALL_DIR/daemon.pid")" 2>/dev/null; then
+    daemon_running=true
+elif pgrep -f "daemon/main.py" > /dev/null; then
+    daemon_running=true
+fi
+
+if $daemon_running; then
     echo -e "${YELLOW}Daemon is running${NC}"
 
     if [ $daemon_changed -gt 0 ]; then
         echo ""
         echo "Daemon files changed - restart required:"
-        echo "  pkill -f claude-voice-daemon && claude-voice-daemon"
+        echo "  pkill -f daemon/main.py && claude-voice-daemon"
         echo ""
         echo "Or reload config only (if only config logic changed):"
         echo "  claude-voice-daemon reload"
