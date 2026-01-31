@@ -8,6 +8,9 @@ import threading
 import time
 
 from daemon.telegram import TelegramClient, make_options_keyboard, make_permission_keyboard
+from daemon.request_queue import RequestQueue, QueuedRequest
+from daemon.request_router import QueueRouter
+from daemon.session_presenter import SingleChatPresenter
 
 # Response files directory
 RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
@@ -35,8 +38,16 @@ class AfkManager:
         self.config = config
         self.active = False
         self._client = None
-        self._pending = {}  # message_id -> PendingRequest
+
+        # NEW: Use abstractions
+        self._queue = RequestQueue()
+        self._router = None  # Set when client is created
+        self._presenter = None  # Set when client is created
+
+        # OLD: Keep for compatibility during refactor
+        self._pending = {}  # message_id -> PendingRequest (DEPRECATED)
         self._pending_lock = threading.Lock()
+
         self._session_contexts = {}  # session -> last known context string
         self._sent_message_ids = []  # track all sent message IDs for /clear
         self._previous_mode = None  # mode before AFK was activated
@@ -72,6 +83,10 @@ class AfkManager:
         if not self._client.verify():
             self._client = None
             return False
+
+        # NEW: Initialize router and presenter
+        self._router = QueueRouter(self._queue)
+        self._presenter = SingleChatPresenter(self._client)
 
         self._client.start_polling(
             on_callback=self._handle_callback,
@@ -129,73 +144,47 @@ class AfkManager:
             return {"wait": False}
 
         session = request.get("session", "unknown")
-        req_type = request.get("type", "input")  # "permission", "input", "context", "ask_user_question"
+        req_type = request.get("type", "input")
+        prompt = request.get("prompt", "")
         context = request.get("context", "")
         raw_text = request.get("raw_text", "")
-        prompt = request.get("prompt", "")
 
-        # Store latest context for /status (prefer raw_text for full content)
+        # Update session context
         display_context = raw_text or context
         if display_context:
             self._session_contexts[session] = display_context
         elif session in self._session_contexts:
-            # Use last known context as fallback (e.g. permission prompts lack context)
             display_context = self._session_contexts[session]
 
-        max_chars = TELEGRAM_MAX_CHARS
-        lines = [f"<b>[{session}]</b>"]
-        if display_context:
-            context_text = display_context.strip()
-            if len(context_text) > max_chars:
-                context_text = context_text[-max_chars:]
-                # Don't start mid-line
-                nl = context_text.find("\n")
-                if nl != -1:
-                    context_text = context_text[nl + 1:]
-            lines.append(
-                _markdown_to_telegram_html(context_text)
-            )
-
+        # Handle context-only updates
         if req_type == "context":
-            # Context update from speak-response — show text, no pending request
-            text = "\n".join(lines)
-            self._send(text)
+            # Just update context, don't queue
+            emoji = self._queue.get_session_emoji(session)
+            text = f"{emoji} [{session}]\n{_markdown_to_telegram_html(display_context[:3900])}"
+            self._presenter.send_to_session(session, text)
             return {"wait": False}
 
-        if req_type == "permission":
-            lines.append(f"\nPermission: {_escape_html(prompt)}")
-            markup = make_permission_keyboard()
-        elif req_type == "ask_user_question":
-            questions = request.get("questions", [])
-            for q in questions:
-                lines.append(f"\n<b>{_escape_html(q.get('question', ''))}</b>")
-                for opt in q.get("options", []):
-                    lines.append(
-                        f"  • <b>{_escape_html(opt.get('label', ''))}</b>"
-                        f" — {_escape_html(opt.get('description', ''))}"
-                    )
-            # Use first question's options for keyboard buttons
-            first_options = questions[0].get("options", []) if questions else []
-            markup = make_options_keyboard(first_options) if first_options else None
-        else:
-            lines.append(f"\nClaude asks: {_escape_html(prompt)}")
-            lines.append("\nReply with your answer.")
-            markup = None
-
-        text = "\n".join(lines)
-        msg_id = self._send(text, reply_markup=markup)
-
-        # Each request type gets its own response file to avoid collisions
+        # Create response path
         response_path = self._response_path(session, suffix=req_type)
 
-        # Register pending request
-        pending = PendingRequest(session, req_type, prompt, msg_id,
-                                 response_path=response_path)
-        if msg_id:
-            with self._pending_lock:
-                self._pending[msg_id] = pending
+        # Create queued request
+        queued_req = QueuedRequest(
+            session=session,
+            req_type=req_type,
+            prompt=prompt,
+            response_path=response_path,
+        )
 
-        # Tell hook where to find the response
+        # Enqueue request
+        status = self._queue.enqueue(queued_req)
+
+        if status == "active":
+            # Present immediately
+            self._present_active_request()
+        else:
+            # Send queued notification
+            self._send_queued_notification(queued_req)
+
         return {"wait": True, "response_path": response_path}
 
     def handle_status_request(self) -> None:
@@ -311,6 +300,55 @@ class AfkManager:
         else:
             # No pending request — type directly into the terminal prompt
             self._type_into_terminal(text)
+
+    def _present_active_request(self) -> None:
+        """Present the active request to user."""
+        active = self._queue.get_active()
+        if not active:
+            return
+
+        summary = self._queue.get_queue_summary()
+        active_info = summary[0] if summary else {}
+
+        queue_info = {
+            'emoji': active_info.get('emoji', '🟢'),
+            'queue_size': self._queue.size(),
+            'queue_sessions': [s['session'] for s in summary[1:]] if len(summary) > 1 else [],
+        }
+
+        text, markup = self._presenter.format_active_request(active, queue_info)
+        msg_id = self._presenter.send_to_session(active.session, text, markup)
+
+        # Store message_id for routing
+        if msg_id:
+            active.message_id = msg_id
+            self._sent_message_ids.append(msg_id)
+
+    def _send_queued_notification(self, req: QueuedRequest) -> None:
+        """Send notification that request was queued."""
+        summary = self._queue.get_queue_summary()
+
+        # Find this request in summary
+        req_info = None
+        active_info = summary[0] if summary else {}
+        for item in summary:
+            if item['request'] == req:
+                req_info = item
+                break
+
+        if not req_info:
+            return
+
+        queue_info = {
+            'emoji': req_info.get('emoji', '⏸️'),
+            'position': req_info.get('position', 0),
+            'total': len(summary),
+            'active_session': active_info.get('session', 'unknown'),
+            'active_type': active_info.get('req_type', 'request'),
+        }
+
+        text = self._presenter.format_queued_notification(req, queue_info)
+        self._presenter.send_to_session(req.session, text)
 
     def _type_into_terminal(self, text: str) -> None:
         """Type text into the terminal prompt via a background subprocess."""
