@@ -278,6 +278,36 @@ Full voice list: https://huggingface.co/mlx-community/Kokoro-82M-bf16/blob/main/
 
 ---
 
+## Testing
+
+Run the test suite:
+
+```bash
+~/.claude-voice/venv/bin/python -m pytest tests/ -v
+```
+
+Run with coverage (shows which lines are missing tests):
+
+```bash
+~/.claude-voice/venv/bin/python -m pytest tests/ --cov=daemon --cov=hooks --cov-report=term-missing
+```
+
+Generate an HTML coverage report (opens in browser):
+
+```bash
+~/.claude-voice/venv/bin/python -m pytest tests/ --cov=daemon --cov=hooks --cov-report=html
+open htmlcov/index.html
+```
+
+Run only unit or integration tests:
+
+```bash
+~/.claude-voice/venv/bin/python -m pytest tests/unit/ -v
+~/.claude-voice/venv/bin/python -m pytest tests/integration/ -v
+```
+
+---
+
 ## Components
 
 ### Voice Input (Daemon)
