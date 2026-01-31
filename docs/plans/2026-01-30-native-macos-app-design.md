@@ -143,38 +143,55 @@ Daemon distinguishes connection types: short-lived command connections get a JSO
 - Sparkle `appcast.xml` entry
 - Source code (for Path A users)
 
-## Project Structure
+## Two-Repo Structure (Open Core Model)
 
+The Python daemon is open source. The SwiftUI app is proprietary (sold separately).
+
+**Public repo: `claude-voice`** (existing, MIT license)
 ```
 claude-voice/
-  app/                          # NEW — SwiftUI Xcode project
-    Claude Voice.xcodeproj
-    Claude Voice/
-      App.swift                 # @main, MenuBarExtra
-      MenuBarView.swift         # Dropdown menu
-      SettingsView.swift        # Preferences window
-      SetupWizardView.swift     # First-run setup
-      DaemonManager.swift       # Start/stop/monitor daemon
-      ControlSocket.swift       # Unix socket client
-      ConfigManager.swift       # Read/write config.yaml
-      Models/
-        AppState.swift          # Observable state
-        Config.swift            # Config.yaml model
-      Resources/
-        Assets.xcassets         # Menu bar icon
-    Sparkle/                    # Auto-update framework
-  daemon/                       # UNCHANGED — Python daemon
-  hooks/                        # UNCHANGED — Claude Code hooks
-  install.sh                    # UNCHANGED — developer install
+  daemon/                       # Python daemon (+ new control.py)
+  hooks/                        # Claude Code hooks
+  install.sh                    # Developer install path
   ...
 ```
 
-## Daemon-Side Changes
+**Private repo: `claude-voice-app`** (new, proprietary)
+```
+claude-voice-app/
+  Package.swift                 # SPM project
+  Claude Voice/
+    App.swift                   # @main, MenuBarExtra
+    Views/
+      MenuBarView.swift         # Dropdown menu
+      SettingsView.swift        # Preferences window
+      SetupWizardView.swift     # First-run setup
+    Services/
+      DaemonManager.swift       # Start/stop/monitor daemon
+      ControlSocket.swift       # Unix socket client
+      ConfigManager.swift       # Read/write config.yaml
+      Installer.swift           # First-run setup logic
+    Models/
+      AppState.swift            # Observable state
+      Config.swift              # Config.yaml model
+    Resources/
+      Assets.xcassets           # Menu bar icon
+  build-dmg.sh                  # Build + bundle script
+  appcast.xml                   # Sparkle update feed template
+```
+
+The private repo has NO dependency on the public repo at compile time. They communicate only via:
+- The control socket protocol (`~/.claude-voice/.control.sock`)
+- The config file format (`~/.claude-voice/config.yaml`)
+
+The DMG build script clones the public repo to bundle daemon files into the app's Resources for first-run setup.
+
+## Daemon-Side Changes (Public Repo)
 
 Minimal changes to the Python daemon:
 
-1. **New control socket server** in `main.py`: listen on `.control.sock`, handle JSON commands, emit events
-2. **Config reload command**: re-read `config.yaml` without restart
+1. **New `daemon/control.py`**: control socket server module
+2. **Updates to `daemon/main.py`**: start control server, add helper methods for mode/voice/config
 3. **No other changes** — all existing functionality stays as-is
 
 ## What Stays Unchanged
