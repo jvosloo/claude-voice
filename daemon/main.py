@@ -29,6 +29,7 @@ import sounddevice as sd
 sys.path.insert(0, os.path.expanduser("~/.claude-voice"))
 
 from daemon.config import load_config
+from daemon.control import ControlServer
 from daemon.audio import AudioRecorder
 from daemon.transcribe import Transcriber
 from daemon.keyboard import KeyboardSimulator
@@ -152,6 +153,29 @@ class VoiceDaemon:
                 model_name=self.config.input.cleanup_model,
                 debug=self.config.input.debug,
             )
+
+    # -- Control socket helpers (called by ControlServer) --
+
+    def get_mode(self) -> str:
+        return _read_mode()
+
+    def set_mode(self, mode: str) -> None:
+        _write_mode(mode)
+
+    def get_voice_enabled(self) -> bool:
+        return not os.path.exists(SILENT_FLAG)
+
+    def set_voice_enabled(self, enabled: bool) -> None:
+        if enabled:
+            if os.path.exists(SILENT_FLAG):
+                os.remove(SILENT_FLAG)
+        else:
+            with open(SILENT_FLAG, "w") as f:
+                pass
+
+    def reload_config(self) -> None:
+        self.config = load_config()
+        print("Config reloaded")
 
     def _on_language_change(self, lang: str) -> None:
         """Called when language is cycled."""
@@ -399,6 +423,9 @@ class VoiceDaemon:
         from daemon import overlay
         overlay.hide()
 
+        if hasattr(self, "control_server"):
+            self.control_server.shutdown()
+
         if self._tts_server:
             try:
                 self._tts_server.close()
@@ -525,6 +552,12 @@ class VoiceDaemon:
             tts_thread = threading.Thread(target=self._run_tts_server, daemon=True)
             tts_thread.start()
             print(f"TTS server listening on {TTS_SOCK_PATH}")
+
+            # Start control socket server (for external app communication)
+            self.control_server = ControlServer(self)
+            control_thread = threading.Thread(target=self.control_server.run, daemon=True)
+            control_thread.start()
+            print("Control server listening on ~/.claude-voice/.control.sock")
 
             # Start Telegram polling (always-on for /afk command)
             if self.afk.is_configured:
