@@ -141,8 +141,8 @@ afk:
 
 | Action | Method |
 |--------|--------|
-| Activate | Say "going AFK" or press Left Alt+A |
-| Deactivate | Say "back at keyboard", press Left Alt+A, or send `/back` in Telegram |
+| Activate | Say "going AFK", press Left Alt+A, or send `/afk` in Telegram |
+| Deactivate | Say "back at keyboard", press Left Alt+A, or send `/back` or `/afk` in Telegram |
 | Check status | Send `/status` in Telegram |
 | Approve permission | Tap Yes / No button |
 | Provide input | Type your reply in the Telegram chat |
