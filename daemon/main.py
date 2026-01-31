@@ -261,6 +261,24 @@ class VoiceDaemon:
             )
             changed.append("overlay")
 
+        # Notify phrases: regenerate if voice/speed/lang_code changed
+        voice_changed = (
+            new.speech.voice != old.speech.voice
+            or new.speech.speed != old.speech.speed
+            or new.speech.lang_code != old.speech.lang_code
+            or new.speech.notify_phrases != old.speech.notify_phrases
+        )
+        if voice_changed:
+            from daemon.notify import regenerate_custom_phrases
+            regenerate_custom_phrases(
+                new.speech.notify_phrases,
+                voice=new.speech.voice,
+                speed=new.speech.speed,
+                lang_code=new.speech.lang_code,
+                interactive=False,
+            )
+            changed.append("notify_phrases")
+
         # AfkManager: recreate with new config
         if (new.afk.telegram.bot_token != old.afk.telegram.bot_token
                 or new.afk.telegram.chat_id != old.afk.telegram.chat_id):
@@ -594,7 +612,8 @@ class VoiceDaemon:
         else:
             print(f"AFK mode: not configured (set telegram bot_token and chat_id)")
 
-        # Initialize overlay early for startup feedback
+        # Initialize overlay (creates window, but Cocoa run loop isn't running yet
+        # so animations won't play until later)
         overlay_cfg = self.config.overlay
         if overlay_cfg.enabled:
             from daemon import overlay
@@ -603,42 +622,58 @@ class VoiceDaemon:
                 transcribing_color=overlay_cfg.transcribing_color,
                 style=overlay_cfg.style,
             )
-            overlay.show_loading_flash("Claude Voice Starting")
 
-        def _finish_startup():
-            """Heavy startup work (model loading, etc.) — runs in background thread."""
-            # Pre-load models
+        # Interactive prompts run on main thread BEFORE Cocoa steals focus
+        is_foreground = sys.stdin.isatty()
+        if is_foreground:
+            # Pre-load models so sound check can play
             self.transcriber._ensure_model()
             if self.config.speech.enabled:
                 self.tts_engine._ensure_model()
 
-                # Sound check (only in interactive/foreground mode)
-                if sys.stdin.isatty():
-                    print('\nSound check: playing "Hello!! Can you hear me?"')
-                    self.tts_engine.speak(
-                        "Hello!! Can you hear me?",
-                        voice=self.config.speech.voice,
-                        speed=self.config.speech.speed,
-                        lang_code=self.config.speech.lang_code,
-                    )
-                    answer = input("Did you hear the test phrase? [Y/n] ").strip().lower()
-                    if answer in ("n", "no"):
-                        print("Tip: check your audio output device and volume settings.")
-                        print("Continuing startup anyway...\n")
-                    else:
-                        print("Sound check passed.\n")
+                print('\nSound check: playing "Hello!! Can you hear me?"')
+                self.tts_engine.speak(
+                    "Hello!! Can you hear me?",
+                    voice=self.config.speech.voice,
+                    speed=self.config.speech.speed,
+                    lang_code=self.config.speech.lang_code,
+                )
+                answer = input("Did you hear the test phrase? [Y/n] (default: Y) ").strip().lower()
+                if answer in ("n", "no"):
+                    print("Tip: check your audio output device and volume settings.")
+                    print("Continuing startup anyway...\n")
+                else:
+                    print("Sound check passed.\n")
 
             # Regenerate custom notify phrases if needed
             if self.config.speech.mode == "notify" or self.config.speech.notify_phrases:
                 from daemon.notify import regenerate_custom_phrases
-                is_foreground = sys.stdin.isatty()
                 regenerate_custom_phrases(
                     self.config.speech.notify_phrases,
                     voice=self.config.speech.voice,
                     speed=self.config.speech.speed,
                     lang_code=self.config.speech.lang_code,
-                    interactive=is_foreground,
+                    interactive=True,
                 )
+
+        def _finish_startup():
+            """Heavy startup work (model loading, etc.) — runs in background thread."""
+            # Pre-load models (skip if already done in interactive mode above)
+            if not is_foreground:
+                self.transcriber._ensure_model()
+                if self.config.speech.enabled:
+                    self.tts_engine._ensure_model()
+
+                # Regenerate custom notify phrases if needed
+                if self.config.speech.mode == "notify" or self.config.speech.notify_phrases:
+                    from daemon.notify import regenerate_custom_phrases
+                    regenerate_custom_phrases(
+                        self.config.speech.notify_phrases,
+                        voice=self.config.speech.voice,
+                        speed=self.config.speech.speed,
+                        lang_code=self.config.speech.lang_code,
+                        interactive=False,
+                    )
 
             # Check transcription cleanup if enabled
             if self.cleaner:

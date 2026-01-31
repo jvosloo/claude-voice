@@ -9,6 +9,7 @@ Commands (client → daemon):
     {"cmd": "voice_on"}                  → enable voice output
     {"cmd": "voice_off"}                 → disable voice output
     {"cmd": "reload_config"}             → re-read config.yaml
+    {"cmd": "speak"}                     → play "ready for input" phrase (voice preview)
     {"cmd": "stop"}                      → shutdown daemon
     {"cmd": "subscribe"}                 → keep connection open for events
 
@@ -71,6 +72,17 @@ class ControlServer:
         if cmd == "reload_config":
             self.daemon.reload_config()
             self.emit({"event": "config_reloaded"})
+            return {"ok": True}
+
+        if cmd == "speak":
+            from daemon.notify import _get_phrase_path
+            import subprocess
+            path = _get_phrase_path("done", self.daemon.config.speech.notify_phrases)
+            if os.path.exists(path):
+                threading.Thread(
+                    target=lambda: subprocess.run(["afplay", path]),
+                    daemon=True,
+                ).start()
             return {"ok": True}
 
         if cmd == "stop":

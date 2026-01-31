@@ -54,6 +54,25 @@ class TestHandleCommand:
         assert resp == {"ok": True}
         daemon.reload_config.assert_called_once()
 
+    def test_speak_returns_ok(self):
+        server, daemon = _make_server()
+        with patch("daemon.notify._get_phrase_path", return_value="/fake/done.wav"), \
+             patch("os.path.exists", return_value=True), \
+             patch("daemon.control.threading.Thread") as mock_thread:
+            resp = server._handle_command({"cmd": "speak"})
+        assert resp == {"ok": True}
+        mock_thread.assert_called_once()
+        mock_thread.return_value.start.assert_called_once()
+
+    def test_speak_missing_file_still_returns_ok(self):
+        server, daemon = _make_server()
+        with patch("daemon.notify._get_phrase_path", return_value="/fake/missing.wav"), \
+             patch("os.path.exists", return_value=False), \
+             patch("daemon.control.threading.Thread") as mock_thread:
+            resp = server._handle_command({"cmd": "speak"})
+        assert resp == {"ok": True}
+        mock_thread.assert_not_called()
+
     def test_stop_triggers_shutdown(self):
         server, daemon = _make_server()
         with patch("daemon.control.threading.Thread") as mock_thread:

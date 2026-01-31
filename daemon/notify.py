@@ -23,23 +23,13 @@ _playback_proc = None
 
 
 def _get_phrase_path(category: str, config_phrases: dict | None) -> str:
-    """Get the wav file path for a category, respecting custom overrides."""
-    from daemon.config import DEFAULT_NOTIFY_PHRASES
+    """Get the wav file path for a category, preferring cached (voice-matched) versions."""
+    # Always prefer cached version (regenerated to match current voice)
+    cached = os.path.join(_CACHE_DIR, f"{category}.wav")
+    if os.path.exists(cached):
+        return cached
 
-    custom_text = None
-    if config_phrases and category in config_phrases:
-        default_text = DEFAULT_NOTIFY_PHRASES[category]
-        if config_phrases[category] != default_text:
-            custom_text = config_phrases[category]
-
-    if custom_text:
-        # Use cached custom file
-        cached = os.path.join(_CACHE_DIR, f"{category}.wav")
-        if os.path.exists(cached):
-            return cached
-        # Fallback to default if cache missing (will be regenerated on next startup)
-        return os.path.join(_DEFAULT_PHRASES_DIR, f"{category}.wav")
-
+    # Fallback to shipped default
     return os.path.join(_DEFAULT_PHRASES_DIR, f"{category}.wav")
 
 
@@ -76,43 +66,38 @@ def regenerate_custom_phrases(
     lang_code: str = "a",
     interactive: bool = False,
 ) -> None:
-    """Regenerate custom notification phrases with Kokoro TTS.
+    """Regenerate notification phrases with Kokoro TTS.
 
-    Only regenerates phrases whose text differs from the defaults.
-    Checks voice change and prompts/auto-regenerates as needed.
+    Regenerates all phrases (defaults + custom overrides) when the voice,
+    speed, or lang_code changes. Custom phrase text changes also trigger
+    regeneration for those phrases.
     """
     import yaml
     from daemon.config import DEFAULT_NOTIFY_PHRASES
 
-    if not config_phrases:
-        return
+    # Build the full phrase map: defaults, then custom overrides
+    all_phrases = dict(DEFAULT_NOTIFY_PHRASES)
+    if config_phrases:
+        all_phrases.update(config_phrases)
 
-    # Determine which phrases are custom
-    custom = {}
-    for cat, text in config_phrases.items():
-        if cat in DEFAULT_NOTIFY_PHRASES and text != DEFAULT_NOTIFY_PHRASES[cat]:
-            custom[cat] = text
-
-    if not custom:
-        # All match defaults — clean up any stale cache
-        if os.path.exists(_CACHE_DIR):
-            import shutil
-            shutil.rmtree(_CACHE_DIR)
-        return
-
-    # Check if voice has changed
+    # Check cached voice/speed/lang_code
     os.makedirs(_CACHE_DIR, exist_ok=True)
-    prev_voice = None
+    prev_meta = {}
     if os.path.exists(_CACHE_META):
         with open(_CACHE_META) as f:
-            meta = yaml.safe_load(f) or {}
-            prev_voice = meta.get("voice")
+            prev_meta = yaml.safe_load(f) or {}
 
-    voice_changed = prev_voice is not None and prev_voice != voice
+    voice_key = f"{voice}/{speed}/{lang_code}"
+    prev_voice_key = "{}/{}/{}".format(
+        prev_meta.get("voice", ""),
+        prev_meta.get("speed", ""),
+        prev_meta.get("lang_code", ""),
+    )
+    voice_changed = prev_voice_key != voice_key
 
-    # Check which phrases need regeneration
+    # Determine which phrases need regeneration
     needs_regen = {}
-    for cat, text in custom.items():
+    for cat, text in all_phrases.items():
         cached = os.path.join(_CACHE_DIR, f"{cat}.wav")
         if not os.path.exists(cached) or voice_changed:
             needs_regen[cat] = text
@@ -123,16 +108,16 @@ def regenerate_custom_phrases(
     # If voice changed, ask user in interactive mode
     if voice_changed and interactive:
         answer = input(
-            f'Voice changed to "{voice}". Regenerate notify phrases? [Y/n] '
+            f'Voice changed to "{voice}". Regenerate notify phrases? [Y/n] (default: Y) '
         ).strip().lower()
         if answer in ("n", "no"):
             # Update meta so we don't ask again
             with open(_CACHE_META, "w") as f:
-                yaml.dump({"voice": voice}, f)
+                yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code}, f)
             return
 
     # Generate with Kokoro
-    print("Generating custom notification phrases...")
+    print("Generating notification phrases...")
     try:
         import numpy as np
         import soundfile as sf
@@ -154,16 +139,9 @@ def regenerate_custom_phrases(
 
         # Update meta
         with open(_CACHE_META, "w") as f:
-            yaml.dump({"voice": voice}, f)
+            yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code}, f)
 
-        print("Custom notification phrases ready.")
+        print("Notification phrases ready.")
     except Exception as e:
-        print(f"Failed to generate custom phrases: {e}")
+        print(f"Failed to generate phrases: {e}")
         print("Using default phrases as fallback.")
-
-    # Clean up cached files for phrases that are back to default
-    for cat in DEFAULT_NOTIFY_PHRASES:
-        if cat not in custom:
-            cached = os.path.join(_CACHE_DIR, f"{cat}.wav")
-            if os.path.exists(cached):
-                os.remove(cached)

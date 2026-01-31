@@ -145,8 +145,7 @@ if PYOBJC_AVAILABLE:
                 self._draw_dots(bounds)
             elif self._mode == "language_flash":
                 self._draw_label(bounds, large=True)
-            elif self._mode == "loading_flash":
-                self._draw_loading(bounds)
+
 
         def _draw_waveform(self, bounds):
             """Draw animated waveform bars."""
@@ -216,41 +215,6 @@ if PYOBJC_AVAILABLE:
                 x = bounds.size.width - text_size.width - 10
             y = (bounds.size.height - text_size.height) / 2
             text.drawAtPoint_withAttributes_((x, y), attrs)
-
-        def _draw_loading(self, bounds):
-            """Draw text label with animated bouncing dots."""
-            from AppKit import NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSString
-            text = NSString.stringWithString_(self._label)
-            font = NSFont.systemFontOfSize_weight_(FONT_SIZE_LARGE, FONT_WEIGHT)
-            color = self._fg_color.colorWithAlphaComponent_(0.95)
-            attrs = {
-                NSFontAttributeName: font,
-                NSForegroundColorAttributeName: color,
-            }
-            text_size = text.sizeWithAttributes_(attrs)
-            dot_space = 26
-            total_w = text_size.width + dot_space
-            text_x = (bounds.size.width - total_w) / 2
-            text_y = (bounds.size.height - text_size.height) / 2
-            text.drawAtPoint_withAttributes_((text_x, text_y), attrs)
-
-            # 3 small bouncing dots after text
-            dot_r = 2.5
-            dot_gap = 5
-            base_x = text_x + text_size.width + 8
-            base_y = bounds.size.height / 2
-            for i in range(3):
-                dot_phase = self._phase - i * 0.15
-                t = dot_phase % 1.0
-                bounce = math.sin(t / 0.4 * math.pi) * 3.0 if t < 0.4 else 0.0
-                alpha = 0.9 if t < 0.4 else 0.4
-                cx = base_x + i * (dot_r * 2 + dot_gap)
-                cy = base_y + bounce
-                self._fg_color.colorWithAlphaComponent_(alpha).setFill()
-                dot = NSBezierPath.bezierPathWithOvalInRect_(
-                    NSMakeRect(cx - dot_r, cy - dot_r, dot_r * 2, dot_r * 2)
-                )
-                dot.fill()
 
     class OverlayController(NSObject):
         """Controls the floating overlay window. All public methods are thread-safe."""
@@ -398,14 +362,6 @@ if PYOBJC_AVAILABLE:
             self._pill_view.setMode_("idle")
             self._window.setAlphaValue_(0.0)
 
-        def show_loading_flash(self, text):
-            """Show the pill with text + animated dots. Thread-safe."""
-            if self._window is None:
-                return
-            self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                "doShowLoadingFlash:", text, False
-            )
-
         def show_flash(self, text):
             """Flash the pill with arbitrary text. Thread-safe."""
             if self._window is None:
@@ -421,18 +377,6 @@ if PYOBJC_AVAILABLE:
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
                 "doShowLanguageFlash:", lang_code.upper(), False
             )
-
-        def doShowLoadingFlash_(self, text):
-            """Main thread: show pill with text + animated dots (no auto-fade)."""
-            self._stop_anim()
-            self._cancel_fade()
-            self._state = "loading_flash"
-            self._pill_view.setLabel_(text)
-            self._pill_view.setForegroundColor_(NSColor.whiteColor())
-            self._pill_view.setMode_("loading_flash")
-            self._resize_pill(text, padding=66)
-            self._window.setAlphaValue_(1.0)
-            self._start_anim()
 
         def doShowFlash_(self, text):
             """Main thread: show pill with arbitrary text, auto-fade after 1.5s."""
@@ -543,11 +487,6 @@ def init(
 def show_recording(label=None):
     if _controller:
         _controller.show_recording(label=label)
-
-
-def show_loading_flash(text):
-    if _controller:
-        _controller.show_loading_flash(text)
 
 
 def show_flash(text):
