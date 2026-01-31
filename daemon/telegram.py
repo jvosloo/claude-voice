@@ -182,12 +182,11 @@ def make_options_keyboard(options: list[dict]) -> dict:
 
 
 def make_permission_keyboard() -> dict:
-    """Create an inline keyboard with Yes/No buttons for permission prompts."""
+    """Create an inline keyboard with Yes/Always/No buttons for permission prompts."""
     return {
         "inline_keyboard": [
-            [
-                {"text": "\u2713 Yes", "callback_data": "yes"},
-                {"text": "\u2717 No", "callback_data": "no"},
-            ]
+            [{"text": "\u2713 Yes", "callback_data": "yes"}],
+            [{"text": "\u2713 Always allow", "callback_data": "always"}],
+            [{"text": "\u2717 No", "callback_data": "no"}],
         ]
     }

@@ -18,6 +18,16 @@ MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
+DEBUG_LOG = os.path.expanduser("/tmp/claude-voice/logs/permission_hook.log")
+
+
+def debug(msg: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(DEBUG_LOG), exist_ok=True)
+        with open(DEBUG_LOG, "a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} [perm] {msg}\n")
+    except Exception:
+        pass
 
 
 def send_to_daemon(payload: dict) -> dict | None:
@@ -60,17 +70,28 @@ def wait_for_response(response_path: str) -> str | None:
     return None
 
 
-def type_response(text: str) -> None:
-    """Type a response into the terminal using pynput."""
+def select_permission_option(index: int) -> None:
+    """Navigate the permission TUI picker: press Down `index` times, then Enter.
+
+    Permission picker options:
+      0 = Allow once
+      1 = Always allow
+      2 = Don't allow
+    """
     from pynput.keyboard import Controller, Key
     kb = Controller()
-    time.sleep(0.1)
-    for char in text:
-        kb.type(char)
-        time.sleep(0.01)
+    debug(f"select_permission_option({index}): waiting 0.5s for picker")
+    time.sleep(0.5)  # Wait for the picker to render
+    for i in range(index):
+        debug(f"  pressing Down ({i+1}/{index})")
+        kb.press(Key.down)
+        kb.release(Key.down)
+        time.sleep(0.05)
+    debug("  pressing Enter")
     time.sleep(0.1)
     kb.press(Key.enter)
     kb.release(Key.enter)
+    debug("  keystrokes sent")
 
 
 def main():
@@ -105,26 +126,53 @@ def main():
 
     session = os.path.basename(os.getcwd())
     message = hook_input.get("message", "Permission needed")
+    debug(f"Hook fired: session={session}, mode={mode}")
+    debug(f"Message: {message}")
+
+    # Log full hook input for debugging
+    log_dir = os.path.expanduser("/tmp/claude-voice/logs")
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        with open(os.path.join(log_dir, "permission_hook_input.json"), "w") as f:
+            json.dump(hook_input, f, indent=2, default=str)
+    except Exception:
+        pass
 
     # Send to daemon with session info
+    debug("Sending to daemon...")
     response = send_to_daemon({
         "notify_category": "permission",
         "session": session,
         "prompt": message,
         "type": "permission",
     })
+    debug(f"Daemon response: {response}")
 
     # If daemon says to wait (AFK mode), poll for response
     if response and response.get("wait"):
         response_path = response.get("response_path", "")
+        debug(f"Waiting for response at: {response_path}")
         if response_path:
             answer = wait_for_response(response_path)
+            debug(f"Got answer: {answer!r}")
             if answer:
                 answer_lower = answer.lower()
-                if answer_lower in ("yes", "y"):
-                    type_response("y")
+                if answer_lower in ("always",):
+                    debug("Selecting: Always allow (index 1)")
+                    select_permission_option(1)
+                elif answer_lower in ("yes", "y"):
+                    debug("Selecting: Allow once (index 0)")
+                    select_permission_option(0)
                 elif answer_lower in ("no", "n"):
-                    type_response("n")
+                    debug("Selecting: Don't allow (index 2)")
+                    select_permission_option(2)
+                else:
+                    debug(f"Unknown answer: {answer!r}, not selecting anything")
+                debug("Done selecting")
+            else:
+                debug("No answer received (timeout or empty)")
+    else:
+        debug(f"Not waiting (response={response})")
 
 
 if __name__ == "__main__":
