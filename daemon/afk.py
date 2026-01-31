@@ -44,10 +44,6 @@ class AfkManager:
         self._router = None  # Set when client is created
         self._presenter = None  # Set when client is created
 
-        # OLD: Keep for compatibility during refactor
-        self._pending = {}  # message_id -> PendingRequest (DEPRECATED)
-        self._pending_lock = threading.Lock()
-
         self._session_contexts = {}  # session -> last known context string
         self._sent_message_ids = []  # track all sent message IDs for /clear
         self._previous_mode = None  # mode before AFK was activated
@@ -130,9 +126,6 @@ class AfkManager:
         if self._client:
             self._send("AFK mode off. Send /afk to reactivate.")
 
-        with self._pending_lock:
-            self._pending.clear()
-
     def handle_hook_request(self, request: dict) -> dict:
         """Handle a request from a hook. Returns response for the hook.
 
@@ -141,6 +134,10 @@ class AfkManager:
             or {"wait": False} if not in AFK mode.
         """
         if not self.active:
+            return {"wait": False}
+
+        # Require presenter for queue-based handling
+        if not self._presenter:
             return {"wait": False}
 
         session = request.get("session", "unknown")
@@ -194,12 +191,17 @@ class AfkManager:
             return
 
         lines = ["<b>Active sessions:</b>\n"]
+
+        # Get all sessions with pending requests from queue
+        pending_sessions = set()
+        summary = self._queue.get_queue_summary()
+        for item in summary:
+            pending_sessions.add(item['session'])
+
         for session, context in self._session_contexts.items():
             last_line = context.strip().split("\n")[-1] if context else "No recent activity"
             # Check if there's a pending request
-            has_pending = any(
-                p.session == session for p in self._pending.values()
-            )
+            has_pending = session in pending_sessions
             status = " (waiting for you)" if has_pending else ""
             lines.append(f"<b>[{session}]</b>{status}\n{_escape_html(last_line)}\n")
 
@@ -262,7 +264,10 @@ class AfkManager:
                 else:
                     self.deactivate()
             else:
-                self._presenter.send_to_session("", "Not in AFK mode. Send /afk to activate.")
+                if self._presenter:
+                    self._presenter.send_to_session("", "Not in AFK mode. Send /afk to activate.")
+                else:
+                    self._send("Not in AFK mode. Send /afk to activate.")
             return
 
         if cmd == "/status":
@@ -283,10 +288,16 @@ class AfkManager:
 
         # Not in AFK mode
         if not self.active:
-            self._presenter.send_to_session("", "Not in AFK mode. Send /afk to activate.")
+            if self._presenter:
+                self._presenter.send_to_session("", "Not in AFK mode. Send /afk to activate.")
+            else:
+                self._send("Not in AFK mode. Send /afk to activate.")
             return
 
-        # Route text to active request
+        # Route text to active request (requires presenter/router)
+        if not self._router or not self._presenter:
+            return
+
         pending = self._router.route_text_message(text)
 
         if not pending:
@@ -461,14 +472,8 @@ class AfkManager:
             import shutil
             shutil.rmtree(session_dir, ignore_errors=True)
 
-        # Remove pending requests for this session
-        with self._pending_lock:
-            to_remove = [
-                mid for mid, p in self._pending.items() if p.session == session
-            ]
-            for mid in to_remove:
-                del self._pending[mid]
-
+        # Note: Queue cleanup would require additional methods
+        # For now, requests will remain in queue until timeout or completion
         self._session_contexts.pop(session, None)
 
 
