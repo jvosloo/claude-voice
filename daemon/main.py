@@ -216,7 +216,7 @@ class VoiceDaemon:
                 print("AFK mode activated - notifications going to Telegram")
             else:
                 _write_mode(self.afk._previous_mode or "notify")
-                print("AFK mode: failed to connect to Telegram")
+                print("AFK mode: Telegram not connected")
             return True
 
         if text_lower in self.config.afk.voice_commands_deactivate:
@@ -257,7 +257,7 @@ class VoiceDaemon:
                 print("AFK mode activated")
             else:
                 _write_mode(self.afk._previous_mode or "notify")
-                print("AFK mode: failed to connect to Telegram")
+                print("AFK mode: Telegram not connected")
 
     def _run_tts_server(self) -> None:
         """Run Unix socket server for TTS requests from the hook."""
@@ -382,6 +382,7 @@ class VoiceDaemon:
         print("\nShutting down...")
         if self.afk.active:
             self.afk.deactivate()
+        self.afk.stop_listening()
         self._shutting_down = True
 
         # Hide overlay
@@ -503,6 +504,13 @@ class VoiceDaemon:
             tts_thread = threading.Thread(target=self._run_tts_server, daemon=True)
             tts_thread.start()
             print(f"TTS server listening on {TTS_SOCK_PATH}")
+
+            # Start Telegram polling (always-on for /afk command)
+            if self.afk.is_configured:
+                if self.afk.start_listening(on_toggle=self._toggle_afk):
+                    print("Telegram: listening for /afk command")
+                else:
+                    print("Telegram: failed to connect")
 
             # Start hotkey listener on background thread
             self.hotkey_listener.start()

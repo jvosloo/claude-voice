@@ -38,6 +38,7 @@ class AfkManager:
         self._sent_message_ids = []  # track all sent message IDs for /clear
         self._previous_mode = None  # mode before AFK was activated
         self._on_deactivate = None  # callback when AFK is turned off
+        self._on_toggle = None  # callback for /afk command
 
     def _send(self, text: str, reply_markup: dict | None = None) -> int | None:
         """Send a Telegram message and track its ID for /clear."""
@@ -51,47 +52,63 @@ class AfkManager:
         """Check if Telegram credentials are configured."""
         return bool(self.config.afk.telegram.bot_token and self.config.afk.telegram.chat_id)
 
-    def activate(self, on_deactivate=None) -> bool:
-        """Activate AFK mode. Returns True on success."""
+    def start_listening(self, on_toggle=None) -> bool:
+        """Start Telegram polling (always-on). Called once at daemon startup.
+
+        When not in AFK mode, only /afk and other commands are processed.
+        Returns True on success.
+        """
         if not self.is_configured:
             return False
 
-        self._on_deactivate = on_deactivate
+        self._on_toggle = on_toggle
         self._client = TelegramClient(
             self.config.afk.telegram.bot_token,
             self.config.afk.telegram.chat_id,
         )
 
-        # Verify connection
         if not self._client.verify():
             self._client = None
             return False
+
+        self._client.start_polling(
+            on_callback=self._handle_callback,
+            on_message=self._handle_message,
+        )
+        return True
+
+    def stop_listening(self) -> None:
+        """Stop Telegram polling. Called at daemon shutdown."""
+        if self._client:
+            self._client.stop_polling()
+            self._client = None
+
+    def activate(self, on_deactivate=None) -> bool:
+        """Activate AFK mode. Returns True on success."""
+        if not self._client:
+            return False
+
+        self._on_deactivate = on_deactivate
 
         # Create response directory
         os.makedirs(RESPONSE_DIR, exist_ok=True)
 
         self.active = True
-        self._client.start_polling(
-            on_callback=self._handle_callback,
-            on_message=self._handle_message,
-        )
 
         # Send activation message
-        self._send("AFK mode active.")
+        self._send("AFK mode active. Send /back to deactivate.")
 
         return True
 
     def deactivate(self) -> None:
-        """Deactivate AFK mode."""
+        """Deactivate AFK mode. Polling continues for /afk command."""
         if not self.active:
             return
 
         self.active = False
         self._sent_message_ids.clear()
         if self._client:
-            self._send("AFK mode off. Back to voice.")
-            self._client.stop_polling()
-            self._client = None
+            self._send("AFK mode off. Send /afk to reactivate.")
 
         with self._pending_lock:
             self._pending.clear()
@@ -227,17 +244,35 @@ class AfkManager:
 
     def _handle_message(self, text: str) -> None:
         """Handle a text message from Telegram."""
-        # Handle commands
-        if text.strip().lower() == "/back":
-            self.deactivate()
+        cmd = text.strip().lower()
+
+        # Commands that work regardless of AFK state
+        if cmd == "/afk":
+            if self._on_toggle:
+                self._on_toggle()
             return
 
-        if text.strip().lower() == "/status":
+        if cmd == "/back":
+            if self.active:
+                if self._on_toggle:
+                    self._on_toggle()
+                else:
+                    self.deactivate()
+            else:
+                self._send("Not in AFK mode. Send /afk to activate.")
+            return
+
+        if cmd == "/status":
             self.handle_status_request()
             return
 
-        if text.strip().lower() == "/clear":
+        if cmd == "/clear":
             self._handle_clear()
+            return
+
+        # When not in AFK mode, ignore non-command messages
+        if not self.active:
+            self._send("Not in AFK mode. Send /afk to activate.")
             return
 
         # Route text reply to the best pending request.
