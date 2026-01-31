@@ -73,10 +73,12 @@ def regenerate_custom_phrases(
     regeneration for those phrases.
     """
     import yaml
-    from daemon.config import DEFAULT_NOTIFY_PHRASES
+    from daemon.config import DEFAULT_NOTIFY_PHRASES, NOTIFY_PHRASES_BY_LANG
 
-    # Build the full phrase map: defaults, then custom overrides
+    # Build the full phrase map: translated defaults for lang_code, then custom overrides
     all_phrases = dict(DEFAULT_NOTIFY_PHRASES)
+    if lang_code in NOTIFY_PHRASES_BY_LANG:
+        all_phrases.update(NOTIFY_PHRASES_BY_LANG[lang_code])
     if config_phrases:
         all_phrases.update(config_phrases)
 

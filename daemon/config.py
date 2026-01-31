@@ -31,6 +31,15 @@ DEFAULT_NOTIFY_PHRASES = {
     "done": "Ready for input",
 }
 
+# Translated notify phrases per Kokoro lang_code.
+# Only languages with working Kokoro TTS pipelines are included.
+# a=American, b=British use English defaults (no entry needed).
+# Many lang_codes (e, f, h, i, p) have upstream phonemizer bugs;
+# j and z require extra pip packages (misaki[ja], misaki[zh]).
+# Translations can be added here as Kokoro support improves.
+NOTIFY_PHRASES_BY_LANG = {
+}
+
 @dataclass
 class SpeechConfig:
     enabled: bool = True
