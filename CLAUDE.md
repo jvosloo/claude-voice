@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Reference
+
+```bash
+# ALWAYS deploy after code changes
+./deploy.sh
+
+# Run all tests
+~/.claude-voice/venv/bin/python -m pytest tests/ -v
+
+# Restart daemon (after deploying code changes)
+pkill -f claude-voice-daemon && claude-voice-daemon
+
+# Reload config only (no restart needed)
+claude-voice-daemon reload
+```
+
 ## Project Overview
 
 Claude Voice is a macOS daemon providing push-to-talk voice input and bidirectional voice output for Claude Code. It transcribes speech via Whisper, types it into the focused app, and speaks Claude's responses via Kokoro TTS. An AFK mode enables remote interaction through Telegram.
@@ -128,26 +144,37 @@ Commands sent as JSON over `~/.claude-voice/.control.sock`:
 
 ## Deployment
 
-The local installation at `~/.claude-voice/` is separate from this repo. After making changes, deploy by copying files:
+The local installation at `~/.claude-voice/` is separate from this repo. After making changes, deploy with:
 
 ```bash
-cp daemon/*.py ~/.claude-voice/daemon/
-cp hooks/*.py ~/.claude/hooks/
+./deploy.sh
 ```
+
+The script will:
+- Copy changed files from `daemon/` to `~/.claude-voice/daemon/`
+- Copy changed files from `hooks/` to `~/.claude/hooks/`
+- Show what changed (+ for new, * for updated)
+- Check if the daemon is running
+- Advise whether restart is needed
 
 The daemon must be restarted to pick up code changes (or use `reload_config` for config-only changes).
 
-To send a reload command without restarting:
+Quick commands:
 ```bash
-echo '{"cmd":"reload_config"}' | python3 -c "import socket,json,sys; s=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); s.connect('$HOME/.claude-voice/.control.sock'); s.sendall(json.dumps({'cmd':'reload_config'}).encode()); s.shutdown(1); print(s.recv(4096).decode()); s.close()"
-```
+# Deploy all changes
+./deploy.sh
 
-Kill all daemon instances: `pkill -f claude-voice-daemon`
+# Restart daemon after deployment
+pkill -f claude-voice-daemon && claude-voice-daemon
+
+# Reload config only (no restart)
+claude-voice-daemon reload
+```
 
 ## Gotchas
 
 - **Don't commit without being asked:** Only commit when the user explicitly requests it.
-- **Deploy after every code change:** Always copy modified files to `~/.claude-voice/` after editing — the daemon runs from the local installation, not the repo.
+- **Deploy after every code change:** ALWAYS run `./deploy.sh` after editing daemon or hooks files — the daemon runs from the local installation at `~/.claude-voice/`, not the repo. This is not optional.
 - **Overlay must use main thread:** All NSWindow/NSView operations must happen on the main thread. Use `performSelectorOnMainThread_withObject_waitUntilDone_` for thread-safe dispatch from background threads. `NSWindowBelow` = -1, `NSWindowAbove` = 1 (not 0 or 2).
 - **PyYAML scientific notation:** `safe_load` parses values like `5e-1` as strings, not floats. The settings app has a `fixScientificNotation()` workaround but values in config.yaml should use decimal form (`0.5`, `0.0`, `1.0`).
 - **Notify phrases are cached .wav files:** When voice/speed/lang_code changes, `regenerate_custom_phrases` must be called to re-render them. The `reload_config` method handles this automatically.

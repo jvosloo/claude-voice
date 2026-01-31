@@ -308,6 +308,58 @@ Run only unit or integration tests:
 
 ---
 
+## Development
+
+### Deployment
+
+The local installation at `~/.claude-voice/` is separate from this repo. After making code changes, deploy with:
+
+```bash
+./deploy.sh
+```
+
+The script will:
+- Copy changed files from `daemon/` to `~/.claude-voice/daemon/`
+- Copy changed files from `hooks/` to `~/.claude/hooks/`
+- Show what changed (+ for new, * for updated)
+- Check if the daemon is running and advise whether restart is needed
+
+**Quick workflow:**
+```bash
+# 1. Edit code in daemon/ or hooks/
+# 2. Deploy changes
+./deploy.sh
+
+# 3. Restart daemon (if daemon files changed)
+pkill -f claude-voice-daemon && claude-voice-daemon
+
+# Or reload config only (if only config logic changed)
+claude-voice-daemon reload
+```
+
+### Project Structure
+
+```
+claude-voice/                    # This repo (development)
+├── daemon/                      # Daemon source code
+├── hooks/                       # Hook scripts source code
+├── tests/                       # Test suite
+├── install.sh                   # Installer
+├── deploy.sh                    # Deployment script
+└── CLAUDE.md                    # Developer documentation
+
+~/.claude-voice/                 # Local installation (runtime)
+├── daemon/                      # Deployed daemon code
+├── config.yaml                  # User configuration
+├── venv/                        # Python virtualenv
+└── models/                      # Downloaded AI models
+
+~/.claude/hooks/                 # Deployed hooks
+└── speak-response.py            # TTS hook
+```
+
+---
+
 ## Components
 
 ### Voice Input (Daemon)
