@@ -73,3 +73,54 @@ def read_mode() -> str:
         except Exception:
             pass
     return ""
+
+
+PERMISSION_RULES_FILE = os.path.expanduser("~/.claude-voice/permission_rules.json")
+
+
+def load_permission_rules() -> list[dict]:
+    """Load permission rules from file."""
+    if not os.path.exists(PERMISSION_RULES_FILE):
+        return []
+    try:
+        with open(PERMISSION_RULES_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def store_permission_rule(pattern: str) -> None:
+    """Store a new 'always allow' rule."""
+    rules = load_permission_rules()
+
+    # Check if pattern already exists
+    for rule in rules:
+        if rule.get("pattern") == pattern:
+            return  # Already exists
+
+    # Add new rule
+    rules.append({
+        "pattern": pattern,
+        "behavior": "allow",
+        "added": time.time(),
+    })
+
+    # Save
+    os.makedirs(os.path.dirname(PERMISSION_RULES_FILE), exist_ok=True)
+    with open(PERMISSION_RULES_FILE, "w") as f:
+        json.dump(rules, f, indent=2)
+
+
+def check_permission_rules(message: str) -> str | None:
+    """Check if message matches any permission rules. Returns behavior or None."""
+    rules = load_permission_rules()
+
+    for rule in rules:
+        pattern = rule.get("pattern", "")
+        behavior = rule.get("behavior", "ask")
+
+        # Simple substring match for now
+        if pattern and pattern in message:
+            return behavior
+
+    return None
