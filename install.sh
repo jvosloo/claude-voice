@@ -292,19 +292,23 @@ else
     fi
 fi
 
-# Install Claude Code hook
+# Install Claude Code hooks
 echo "Installing Claude Code hooks..."
 cp "$SCRIPT_DIR/hooks/speak-response.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/notify-permission.py" "$CLAUDE_HOOKS_DIR/"
+cp "$SCRIPT_DIR/hooks/handle-ask-user.py" "$CLAUDE_HOOKS_DIR/"
+cp "$SCRIPT_DIR/hooks/_type_answer.py" "$CLAUDE_HOOKS_DIR/"
+cp "$SCRIPT_DIR/hooks/_common.py" "$CLAUDE_HOOKS_DIR/"
 chmod +x "$CLAUDE_HOOKS_DIR/speak-response.py"
 chmod +x "$CLAUDE_HOOKS_DIR/notify-permission.py"
+chmod +x "$CLAUDE_HOOKS_DIR/handle-ask-user.py"
 
 # Update Claude settings for hook
 echo "Configuring Claude Code settings..."
 if [ -f "$CLAUDE_SETTINGS" ]; then
-    # Check if Stop hook already exists
-    if grep -q '"Stop"' "$CLAUDE_SETTINGS"; then
-        echo "Stop hook already configured in settings.json"
+    # Check if hooks already exist (check for PreToolUse as marker for latest version)
+    if grep -q '"PreToolUse"' "$CLAUDE_SETTINGS"; then
+        echo "Hooks already configured in settings.json"
     else
         # Add the Stop hook to existing settings
         python3 << 'EOF'
@@ -334,10 +338,18 @@ settings['hooks']['Notification'] = [{
     }]
 }]
 
+settings['hooks']['PreToolUse'] = [{
+    "matcher": "AskUserQuestion",
+    "hooks": [{
+        "type": "command",
+        "command": "~/.claude/hooks/handle-ask-user.py"
+    }]
+}]
+
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
 
-print("Added Stop and Notification hooks to settings.json")
+print("Added Stop, Notification, and PreToolUse hooks to settings.json")
 EOF
     fi
 else
@@ -366,11 +378,22 @@ else
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/handle-ask-user.py"
+          }
+        ]
+      }
     ]
   }
 }
 EOF
-    echo "Created settings.json with Stop and Notification hooks"
+    echo "Created settings.json with Stop, Notification, and PreToolUse hooks"
 fi
 
 # macOS permissions check

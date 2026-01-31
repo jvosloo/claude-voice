@@ -233,7 +233,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `language_hotkey` | `null` | Key to cycle transcription languages (e.g. `right_cmd`) |
 | `auto_submit` | `false` | Press Enter automatically after transcription |
 | `min_audio_length` | `0.5` | Ignore recordings shorter than this (seconds) |
-| `typing_delay` | `0.01` | Delay between keystrokes (seconds) |
+| `typing_delay` | `0` | Delay between keystrokes (seconds, e.g. `0.005` for a slight delay) |
 | `transcription_cleanup` | `false` | Clean up transcription using local LLM (requires Ollama) |
 | `cleanup_model` | `qwen2.5:1.5b` | Ollama model for transcription cleanup |
 

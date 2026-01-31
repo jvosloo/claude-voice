@@ -424,7 +424,7 @@ if PYOBJC_AVAILABLE:
             self._pill_view.setLabel_(text)
             self._pill_view.setForegroundColor_(NSColor.whiteColor())
             self._pill_view.setMode_("loading_flash")
-            self._resize_pill_for_loading(text)
+            self._resize_pill(text, font_size=16.0, padding=66)
             self._window.setAlphaValue_(1.0)
             self._start_anim()
 
@@ -437,7 +437,7 @@ if PYOBJC_AVAILABLE:
             self._pill_view.setForegroundColor_(NSColor.whiteColor())
             self._pill_view.setMode_("language_flash")
             # Resize pill width to fit text
-            self._resize_pill_for_text(text)
+            self._resize_pill(text)
             self._window.setAlphaValue_(1.0)
             self._fade_timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 2.2, self, "fadeOut:", None, False
@@ -456,38 +456,25 @@ if PYOBJC_AVAILABLE:
                 1.5, self, "fadeOut:", None, False
             )
 
-        def _resize_pill_for_loading(self, text):
-            """Resize pill for loading text + animated dots."""
-            from AppKit import NSFont, NSFontAttributeName, NSString
-            ns_text = NSString.stringWithString_(text)
-            font = NSFont.systemFontOfSize_weight_(16.0, 0.23)
-            text_width = ns_text.sizeWithAttributes_({NSFontAttributeName: font}).width
-            new_width = max(PILL_WIDTH, text_width + 66)  # extra space for dots
-            screen = NSScreen.mainScreen()
-            screen_frame = screen.frame()
-            x = (screen_frame.size.width - new_width) / 2
-            frame = self._window.frame()
-            frame.origin.x = x
-            frame.size.width = new_width
-            self._window.setFrame_display_(frame, True)
-            pill_rect = NSMakeRect(0, 0, new_width, PILL_HEIGHT)
-            self._pill_view.setFrame_(pill_rect)
-
-        def _resize_pill_for_text(self, text):
+        def _resize_pill(self, text, font_size=18.0, padding=40):
             """Resize the pill window width to fit the given text, centered on screen."""
             from AppKit import NSFont, NSFontAttributeName, NSString
             ns_text = NSString.stringWithString_(text)
-            font = NSFont.systemFontOfSize_weight_(18.0, 0.23)
+            font = NSFont.systemFontOfSize_weight_(font_size, 0.23)
             text_width = ns_text.sizeWithAttributes_({NSFontAttributeName: font}).width
-            new_width = max(PILL_WIDTH, text_width + 40)  # 20px padding each side
+            new_width = max(PILL_WIDTH, text_width + padding)
+            self._set_pill_width(new_width)
+
+        def _set_pill_width(self, width):
+            """Set the pill window to the given width, centered on screen."""
             screen = NSScreen.mainScreen()
             screen_frame = screen.frame()
-            x = (screen_frame.size.width - new_width) / 2
+            x = (screen_frame.size.width - width) / 2
             frame = self._window.frame()
             frame.origin.x = x
-            frame.size.width = new_width
+            frame.size.width = width
             self._window.setFrame_display_(frame, True)
-            pill_rect = NSMakeRect(0, 0, new_width, PILL_HEIGHT)
+            pill_rect = NSMakeRect(0, 0, width, PILL_HEIGHT)
             self._pill_view.setFrame_(pill_rect)
 
         def fadeOut_(self, timer):
@@ -497,15 +484,7 @@ if PYOBJC_AVAILABLE:
             self._pill_view.setMode_("idle")
             self._window.setAlphaValue_(0.0)
             # Restore default pill width
-            screen = NSScreen.mainScreen()
-            screen_frame = screen.frame()
-            x = (screen_frame.size.width - PILL_WIDTH) / 2
-            frame = self._window.frame()
-            frame.origin.x = x
-            frame.size.width = PILL_WIDTH
-            self._window.setFrame_display_(frame, True)
-            pill_rect = NSMakeRect(0, 0, PILL_WIDTH, PILL_HEIGHT)
-            self._pill_view.setFrame_(pill_rect)
+            self._set_pill_width(PILL_WIDTH)
 
         def _cancel_fade(self):
             """Cancel any pending fade timer."""

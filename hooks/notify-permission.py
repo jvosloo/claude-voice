@@ -9,65 +9,17 @@ only when Claude Code actually shows a permission dialog to the user.
 
 import json
 import os
-import socket
 import sys
 import time
 
-TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
-MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
-SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
-ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
-AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
-DEBUG_LOG = os.path.expanduser("/tmp/claude-voice/logs/permission_hook.log")
+# Allow importing _common from the same directory
+sys.path.insert(0, os.path.dirname(__file__))
+from _common import (
+    send_to_daemon, wait_for_response, make_debug_logger, read_mode,
+    SILENT_FLAG, ASK_USER_FLAG,
+)
 
-
-def debug(msg: str) -> None:
-    try:
-        os.makedirs(os.path.dirname(DEBUG_LOG), exist_ok=True)
-        with open(DEBUG_LOG, "a") as f:
-            f.write(f"{time.strftime('%H:%M:%S')} [perm] {msg}\n")
-    except Exception:
-        pass
-
-
-def send_to_daemon(payload: dict) -> dict | None:
-    """Send JSON to daemon and receive a JSON response."""
-    try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(TTS_SOCK_PATH)
-        s.sendall(json.dumps(payload).encode())
-        s.shutdown(socket.SHUT_WR)  # Signal we're done sending
-        # Read response
-        data = b""
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-        s.close()
-        if data:
-            return json.loads(data.decode())
-    except (ConnectionRefusedError, FileNotFoundError):
-        pass
-    except Exception:
-        pass
-    return None
-
-
-def wait_for_response(response_path: str) -> str | None:
-    """Poll for a response file. Returns response text or None on timeout."""
-    deadline = time.time() + AFK_RESPONSE_TIMEOUT
-    while time.time() < deadline:
-        if os.path.exists(response_path):
-            try:
-                with open(response_path) as f:
-                    response = f.read().strip()
-                os.remove(response_path)
-                return response
-            except Exception:
-                pass
-        time.sleep(1)
-    return None
+debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/permission_hook.log"))
 
 
 def select_permission_option(index: int) -> None:
@@ -96,13 +48,7 @@ def select_permission_option(index: int) -> None:
 
 def main():
     # Check mode - only fire in notify or AFK-eligible modes
-    mode = ""
-    if os.path.exists(MODE_FILE):
-        try:
-            with open(MODE_FILE) as f:
-                mode = f.read().strip()
-        except Exception:
-            return
+    mode = read_mode()
 
     if mode not in ("notify", "afk"):
         return

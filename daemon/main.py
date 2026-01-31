@@ -41,13 +41,14 @@ from daemon.afk import AfkManager
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
+ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 
 _cue_stream: sd.OutputStream | None = None
 _cue_lock = threading.Lock()
 
 
 def _read_mode() -> str:
-    """Read the current TTS mode from the mode file. Defaults to narrate."""
+    """Read the current TTS mode from the mode file. Defaults to notify."""
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE) as f:
@@ -56,7 +57,7 @@ def _read_mode() -> str:
                 return mode
         except Exception:
             pass
-    return "narrate"
+    return "notify"
 
 
 def _write_mode(mode: str) -> None:
@@ -201,63 +202,52 @@ class VoiceDaemon:
 
         # AFK mode commands
         if text_lower in self.config.afk.voice_commands_activate:
-            if not self.afk.is_configured:
-                print("AFK mode: Telegram not configured")
-                return True
-            if self.afk.active:
-                print("Already in AFK mode")
-                return True
-            self.afk._previous_mode = _read_mode()
-            _write_mode("afk")
-            if self.afk.activate(on_deactivate=self._exit_afk):
-                _play_cue([440, 660, 880])  # Ascending triple-tone
-                from daemon import overlay
-                overlay.show_flash("AFK")
-                print("AFK mode activated - notifications going to Telegram")
-            else:
-                _write_mode(self.afk._previous_mode or "notify")
-                print("AFK mode: Telegram not connected")
+            self._activate_afk()
             return True
 
         if text_lower in self.config.afk.voice_commands_deactivate:
-            if self.afk.active:
-                self._exit_afk()
-                _play_cue([880, 660, 440])  # Descending triple-tone
-                from daemon import overlay
-                overlay.show_flash("AFK OFF")
-                print("AFK mode deactivated - back to voice")
+            self._deactivate_afk()
             return True
 
         return False
 
-    def _exit_afk(self) -> None:
-        """Exit AFK mode and restore previous voice mode."""
+    def _activate_afk(self) -> None:
+        """Activate AFK mode with cue and overlay feedback."""
+        from daemon import overlay
+        if not self.afk.is_configured:
+            print("AFK mode: Telegram not configured")
+            return
+        if self.afk.active:
+            print("Already in AFK mode")
+            return
+        self.afk._previous_mode = _read_mode()
+        _write_mode("afk")
+        if self.afk.activate():
+            _play_cue([440, 660, 880])  # Ascending triple-tone
+            overlay.show_flash("AFK")
+            print("AFK mode activated")
+        else:
+            _write_mode(self.afk._previous_mode or "notify")
+            print("AFK mode: Telegram not connected")
+
+    def _deactivate_afk(self) -> None:
+        """Deactivate AFK mode, restore previous voice mode, with feedback."""
+        from daemon import overlay
+        if not self.afk.active:
+            return
         previous = self.afk._previous_mode or "notify"
         self.afk.deactivate()
         _write_mode(previous)
-        print(f"Restored {previous} mode")
+        _play_cue([880, 660, 440])  # Descending triple-tone
+        overlay.show_flash("AFK OFF")
+        print(f"AFK mode deactivated, restored {previous} mode")
 
     def _toggle_afk(self) -> None:
         """Toggle AFK mode on/off."""
-        from daemon import overlay
         if self.afk.active:
-            self._exit_afk()
-            _play_cue([880, 660, 440])
-            overlay.show_flash("AFK OFF")
-            print("AFK mode deactivated")
+            self._deactivate_afk()
         else:
-            if not self.afk.is_configured:
-                print("AFK mode: Telegram not configured")
-                return
-            self.afk._previous_mode = _read_mode()
-            _write_mode("afk")
-            if self.afk.activate(on_deactivate=self._exit_afk):
-                _play_cue([440, 660, 880])
-                overlay.show_flash("AFK")
-                print("AFK mode activated")
-            else:
-                _write_mode(self.afk._previous_mode or "notify")
-                print("AFK mode: Telegram not connected")
+            self._activate_afk()
 
     def _run_tts_server(self) -> None:
         """Run Unix socket server for TTS requests from the hook."""
@@ -379,11 +369,22 @@ class VoiceDaemon:
 
     def _shutdown(self) -> None:
         """Clean shutdown of the daemon."""
+        global _cue_stream
         print("\nShutting down...")
         if self.afk.active:
             self.afk.deactivate()
         self.afk.stop_listening()
         self._shutting_down = True
+
+        # Close audio cue stream
+        with _cue_lock:
+            if _cue_stream is not None:
+                try:
+                    _cue_stream.stop()
+                    _cue_stream.close()
+                except Exception:
+                    pass
+                _cue_stream = None
 
         # Hide overlay
         from daemon import overlay
@@ -444,6 +445,13 @@ class VoiceDaemon:
             _write_mode(self.config.speech.mode)
         elif _read_mode() == "afk":
             _write_mode(self.config.speech.mode)
+
+        # Clean stale ask-user flag from a previous crash
+        if os.path.exists(ASK_USER_FLAG):
+            try:
+                os.remove(ASK_USER_FLAG)
+            except OSError:
+                pass
         print(f"TTS mode: {_read_mode()}")
         if self.afk.is_configured:
             print(f"AFK mode: configured (Telegram)")

@@ -10,10 +10,12 @@ import socket
 import sys
 import time
 
+# Allow importing _common from the same directory
+sys.path.insert(0, os.path.dirname(__file__))
+from _common import TTS_SOCK_PATH, SILENT_FLAG, MODE_FILE
+
 # Paths
-TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
 CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
-SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 
 def load_config():
     """Load speech config."""
@@ -41,8 +43,14 @@ def _wait_for_transcript_flush(transcript_path: str, timeout: float = 2.0) -> No
         time.sleep(0.15)
 
 
-def extract_last_assistant_message(transcript_path: str) -> str:
-    """Extract the last assistant message from transcript."""
+def extract_last_assistant_message(transcript_path: str, skip_tool_results: bool = True) -> str:
+    """Extract the last assistant message from transcript.
+
+    Args:
+        transcript_path: Path to the JSONL transcript file.
+        skip_tool_results: If True, omit text blocks that immediately follow
+            a tool_use block (these typically contain tool output summaries).
+    """
     if not os.path.exists(transcript_path):
         return ""
 
@@ -61,11 +69,24 @@ def extract_last_assistant_message(transcript_path: str) -> str:
                     content = message.get('content', [])
 
                     text_parts = []
+                    prev_was_tool = False
                     for block in content:
-                        if isinstance(block, dict) and block.get('type') == 'text':
-                            text_parts.append(block.get('text', ''))
+                        if isinstance(block, dict):
+                            if block.get('type') == 'tool_use':
+                                prev_was_tool = True
+                                continue
+                            if block.get('type') == 'text':
+                                text = block.get('text', '')
+                                # Skip text immediately after tool_use (tool result summary)
+                                if skip_tool_results and prev_was_tool:
+                                    prev_was_tool = False
+                                    continue
+                                text_parts.append(text)
+                                prev_was_tool = False
                         elif isinstance(block, str):
-                            text_parts.append(block)
+                            if not (skip_tool_results and prev_was_tool):
+                                text_parts.append(block)
+                            prev_was_tool = False
 
                     if text_parts:
                         last_message = '\n'.join(text_parts)
@@ -180,9 +201,9 @@ def main():
     if os.path.exists(SILENT_FLAG):
         # Check if in AFK mode (AFK overrides silent)
         mode = ""
-        if os.path.exists(os.path.expanduser("~/.claude-voice/.mode")):
+        if os.path.exists(MODE_FILE):
             try:
-                with open(os.path.expanduser("~/.claude-voice/.mode")) as f:
+                with open(MODE_FILE) as f:
                     mode = f.read().strip()
             except Exception:
                 pass
@@ -190,7 +211,10 @@ def main():
             return
 
     # Extract and clean the last response
-    raw_text = extract_last_assistant_message(transcript_path)
+    raw_text = extract_last_assistant_message(
+        transcript_path,
+        skip_tool_results=config.get('skip_tool_results', True),
+    )
     text = clean_text_for_speech(raw_text, config)
 
     if text:

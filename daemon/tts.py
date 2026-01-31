@@ -86,12 +86,7 @@ class TTSEngine:
 
     def stop_playback(self) -> bool:
         """Stop current audio playback. Returns True if playback was active."""
-        proc = self._playback_proc
-        if proc is not None:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            self._playback_proc = None
-            return True
-        return False
+        from daemon import kill_playback_proc
+        was_active = kill_playback_proc(self._playback_proc)
+        self._playback_proc = None
+        return was_active

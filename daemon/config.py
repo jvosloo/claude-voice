@@ -13,17 +13,17 @@ class InputConfig:
     language_hotkey: Optional[str] = None
     auto_submit: bool = False
     min_audio_length: float = 0.5
-    typing_delay: float = 0.01
+    typing_delay: float = 0.0
     transcription_cleanup: bool = False
     cleanup_model: str = "qwen2.5:1.5b"
     debug: bool = False
 
 @dataclass
 class TranscriptionConfig:
-    model: str = "base.en"
+    model: str = "large-v3"
     language: str = "en"
     device: str = "cpu"
-    backend: str = "faster-whisper"  # "faster-whisper" or "mlx"
+    backend: str = "mlx"  # "faster-whisper" or "mlx"
     extra_languages: list = field(default_factory=list)
 
 DEFAULT_NOTIFY_PHRASES = {

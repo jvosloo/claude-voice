@@ -12,60 +12,20 @@ and types the selection into the terminal once the interactive prompt appears.
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
 
-TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
-MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
-ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
-AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
-DEBUG_LOG = os.path.expanduser("/tmp/claude-voice/ask-user-debug.log")
+# Allow importing _common from the same directory
+sys.path.insert(0, os.path.dirname(__file__))
+from _common import send_to_daemon, make_debug_logger, read_mode, ASK_USER_FLAG
 
-
-def debug(msg: str) -> None:
-    """Append a debug message to the log file."""
-    try:
-        os.makedirs(os.path.dirname(DEBUG_LOG), exist_ok=True)
-        with open(DEBUG_LOG, "a") as f:
-            f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
-    except Exception:
-        pass
-
-
-def send_to_daemon(payload: dict) -> dict | None:
-    """Send JSON to daemon and receive a JSON response."""
-    try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(TTS_SOCK_PATH)
-        s.sendall(json.dumps(payload).encode())
-        s.shutdown(socket.SHUT_WR)
-        data = b""
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-        s.close()
-        if data:
-            return json.loads(data.decode())
-    except (ConnectionRefusedError, FileNotFoundError):
-        pass
-    except Exception:
-        pass
-    return None
+debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/ask-user-debug.log"))
 
 
 def main():
     # Only active in AFK mode
-    mode = ""
-    if os.path.exists(MODE_FILE):
-        try:
-            with open(MODE_FILE) as f:
-                mode = f.read().strip()
-        except Exception:
-            return
+    mode = read_mode()
 
     if mode != "afk":
         return
@@ -115,6 +75,7 @@ def main():
 
     # Set flag so notify-permission.py skips the duplicate notification
     try:
+        os.makedirs(os.path.dirname(ASK_USER_FLAG), exist_ok=True)
         with open(ASK_USER_FLAG, "w") as f:
             f.write(str(time.time()))
     except Exception:

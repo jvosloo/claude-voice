@@ -59,7 +59,7 @@ stop() {
 
 status() {
     if [ -f "$PID_FILE" ] && kill -0 $(cat "$PID_FILE") 2>/dev/null; then
-        MODE="narrate"
+        MODE="notify"
         if [ -f "$MODE_FILE" ]; then
             MODE=$(cat "$MODE_FILE")
         fi

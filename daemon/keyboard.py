@@ -6,7 +6,7 @@ from pynput.keyboard import Controller, Key
 class KeyboardSimulator:
     """Types text by simulating keyboard input."""
 
-    def __init__(self, typing_delay: float = 0.01, auto_submit: bool = True):
+    def __init__(self, typing_delay: float = 0.0, auto_submit: bool = False):
         self.typing_delay = typing_delay
         self.auto_submit = auto_submit
         self._keyboard = Controller()

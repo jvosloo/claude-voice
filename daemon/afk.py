@@ -37,7 +37,6 @@ class AfkManager:
         self._session_contexts = {}  # session -> last known context string
         self._sent_message_ids = []  # track all sent message IDs for /clear
         self._previous_mode = None  # mode before AFK was activated
-        self._on_deactivate = None  # callback when AFK is turned off
         self._on_toggle = None  # callback for /afk command
 
     def _send(self, text: str, reply_markup: dict | None = None) -> int | None:
@@ -83,12 +82,10 @@ class AfkManager:
             self._client.stop_polling()
             self._client = None
 
-    def activate(self, on_deactivate=None) -> bool:
+    def activate(self) -> bool:
         """Activate AFK mode. Returns True on success."""
         if not self._client:
             return False
-
-        self._on_deactivate = on_deactivate
 
         # Create response directory
         os.makedirs(RESPONSE_DIR, exist_ok=True)
@@ -101,7 +98,12 @@ class AfkManager:
         return True
 
     def deactivate(self) -> None:
-        """Deactivate AFK mode. Polling continues for /afk command."""
+        """Deactivate AFK mode. Polling continues for /afk command.
+
+        Note: does NOT call the on_deactivate callback. The caller
+        (VoiceDaemon._deactivate_afk) is responsible for mode restore
+        and UI feedback.
+        """
         if not self.active:
             return
 
@@ -112,10 +114,6 @@ class AfkManager:
 
         with self._pending_lock:
             self._pending.clear()
-
-        if self._on_deactivate:
-            self._on_deactivate()
-            self._on_deactivate = None
 
     def handle_hook_request(self, request: dict) -> dict:
         """Handle a request from a hook. Returns response for the hook.

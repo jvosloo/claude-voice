@@ -18,7 +18,6 @@ models/
 logs/
 .silent
 .mode
-.error_pending
 notify_cache/
 
 # macOS

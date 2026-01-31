@@ -63,15 +63,10 @@ def play_phrase(category: str, config_phrases: dict | None = None) -> None:
 def stop_playback() -> bool:
     """Stop current notification playback. Returns True if was playing."""
     global _playback_proc
-    proc = _playback_proc
-    if proc is not None:
-        try:
-            proc.kill()
-        except ProcessLookupError:
-            pass
-        _playback_proc = None
-        return True
-    return False
+    from daemon import kill_playback_proc
+    was_active = kill_playback_proc(_playback_proc)
+    _playback_proc = None
+    return was_active
 
 
 def regenerate_custom_phrases(

@@ -6,9 +6,11 @@ import os
 import sys
 import time
 
-AFK_RESPONSE_TIMEOUT = 600
-ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
-DEBUG_LOG = os.path.expanduser("/tmp/claude-voice/ask-user-debug.log")
+# Allow importing _common from the same directory
+sys.path.insert(0, os.path.dirname(__file__))
+from _common import wait_for_response, make_debug_logger, ASK_USER_FLAG
+
+debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/ask-user-debug.log"))
 
 
 def clear_flag() -> None:
@@ -17,29 +19,6 @@ def clear_flag() -> None:
         os.remove(ASK_USER_FLAG)
     except FileNotFoundError:
         pass
-
-
-def debug(msg: str) -> None:
-    try:
-        with open(DEBUG_LOG, "a") as f:
-            f.write(f"{time.strftime('%H:%M:%S')} [typer] {msg}\n")
-    except Exception:
-        pass
-
-
-def wait_for_response(response_path: str) -> str | None:
-    deadline = time.time() + AFK_RESPONSE_TIMEOUT
-    while time.time() < deadline:
-        if os.path.exists(response_path):
-            try:
-                with open(response_path) as f:
-                    response = f.read().strip()
-                os.remove(response_path)
-                return response
-            except Exception:
-                pass
-        time.sleep(1)
-    return None
 
 
 def select_option(index: int) -> None:
