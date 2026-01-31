@@ -60,3 +60,61 @@ class TestSingleChatPresenterFormatting:
         assert "[myapp]" in text or "myapp" in text
         assert "Provide API key" in text
         assert "claude-voice" in text  # Active session context
+
+
+class TestSingleChatPresenterQueueSummary:
+
+    def test_format_queue_summary_with_multiple_requests(self):
+        """Format full queue summary with active and queued requests."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+
+        summary = [
+            {
+                'session': 'sess-a',
+                'req_type': 'permission',
+                'prompt': 'Bash execution',
+                'status': 'active',
+                'position': 0,
+                'emoji': '🟢',
+                'waiting_seconds': 125,
+            },
+            {
+                'session': 'sess-b',
+                'req_type': 'input',
+                'prompt': 'Provide API key',
+                'status': 'queued',
+                'position': 1,
+                'emoji': '🔵',
+                'waiting_seconds': 45,
+            },
+            {
+                'session': 'sess-a',
+                'req_type': 'ask_user_question',
+                'prompt': 'Choose method',
+                'status': 'queued',
+                'position': 2,
+                'emoji': '🟢',
+                'waiting_seconds': 12,
+            },
+        ]
+
+        text, markup = presenter.format_queue_summary(summary)
+
+        assert "📋 QUEUE (3 total)" in text
+        assert "🟢 Active: [sess-a] permission" in text
+        assert "Waiting: 2m 5s" in text
+
+        assert "Position 1: 🔵 [sess-b] input" in text
+        assert "Waiting: 45s" in text
+
+        assert "Position 2: 🟢 [sess-a]" in text
+
+        # Check buttons
+        assert markup is not None
+        keyboard = markup['inline_keyboard']
+        # First button: Skip active
+        assert "Skip" in keyboard[0][0]['text']
+        # Other buttons: Handle Now for queued items
+        assert "Handle Now" in keyboard[1][0]['text']
+        assert keyboard[1][0]['callback_data'] == "cmd:priority:sess-b"

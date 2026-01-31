@@ -375,23 +375,46 @@ class AfkManager:
         self._presenter.send_to_session(session, text)
 
     def _handle_queue_command(self, cmd: str) -> None:
-        """Handle queue management commands (skip, show_queue)."""
+        """Handle queue management commands (skip, show_queue, priority:<session>)."""
         if cmd == "skip":
             next_req = self._queue.skip_active()
             if next_req:
+                emoji = self._queue.get_session_emoji(next_req.session)
                 self._presenter.send_to_session(
-                    next_req.session,
-                    "⏭️ Skipped. Next request:"
+                    "",
+                    f"⏭️ Skipped. Next: {emoji} [{next_req.session}]"
                 )
                 self._present_active_request()
 
         elif cmd == "show_queue":
             self._send_queue_summary()
 
+        elif cmd.startswith("priority:"):
+            session = cmd[9:]  # Extract session name
+            jumped = self._queue.priority_jump(session)
+            if jumped:
+                emoji = self._queue.get_session_emoji(session)
+                self._presenter.send_to_session(
+                    "",
+                    f"⏭️ Jumped to {emoji} [{session}]"
+                )
+                self._present_active_request()
+            else:
+                self._presenter.send_to_session(
+                    "",
+                    f"No pending requests from [{session}]"
+                )
+
     def _send_queue_summary(self) -> None:
         """Send full queue summary to user."""
-        # Placeholder for Task 7
-        self._presenter.send_to_session("", "Queue summary coming in Task 7")
+        summary = self._queue.get_queue_summary()
+
+        if not summary:
+            self._presenter.send_to_session("", "Queue is empty.")
+            return
+
+        text, markup = self._presenter.format_queue_summary(summary)
+        self._presenter.send_to_session("", text, markup)
 
     def _type_into_terminal(self, text: str) -> None:
         """Type text into the terminal prompt via a background subprocess."""

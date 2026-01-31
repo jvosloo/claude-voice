@@ -105,6 +105,53 @@ class SingleChatPresenter(SessionPresenter):
 
         return "\n".join(lines)
 
+    def format_queue_summary(self, summary: list[dict]) -> tuple[str, dict]:
+        """Format full queue summary. Returns (message_text, reply_markup)."""
+        if not summary:
+            return ("Queue is empty.", None)
+
+        total = len(summary)
+        lines = [f"📋 QUEUE ({total} total)", ""]
+
+        keyboard = []
+
+        for item in summary:
+            emoji = item['emoji']
+            session = item['session']
+            req_type = item['req_type']
+            status = item['status']
+            position = item['position']
+            waiting_sec = item['waiting_seconds']
+
+            # Format waiting time
+            if waiting_sec < 60:
+                wait_str = f"{waiting_sec}s"
+            elif waiting_sec < 3600:
+                wait_str = f"{waiting_sec // 60}m {waiting_sec % 60}s"
+            else:
+                wait_str = f"{waiting_sec // 3600}h {(waiting_sec % 3600) // 60}m"
+
+            if status == 'active':
+                lines.append(f"{emoji} Active: [{session}] {req_type}")
+                lines.append(f"  Waiting: {wait_str}")
+                # Add skip button
+                keyboard.append([{"text": "⏭️ Skip This", "callback_data": "cmd:skip"}])
+            else:
+                lines.append(f"Position {position}: {emoji} [{session}] {req_type}")
+                lines.append(f"  Waiting: {wait_str}")
+                # Add handle now button
+                keyboard.append([{
+                    "text": f"🔼 Handle Now",
+                    "callback_data": f"cmd:priority:{session}"
+                }])
+
+            lines.append("")  # Blank line between items
+
+        text = "\n".join(lines).rstrip()
+        markup = {"inline_keyboard": keyboard} if keyboard else None
+
+        return text, markup
+
     def send_to_session(self, session: str, text: str, markup: dict = None) -> int:
         """Send message to main chat. Returns message_id."""
         return self._client.send_message(text, reply_markup=markup)
