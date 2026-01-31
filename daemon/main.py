@@ -174,8 +174,108 @@ class VoiceDaemon:
                 pass
 
     def reload_config(self) -> None:
-        self.config = load_config()
-        print("Config reloaded")
+        old = self.config
+        new = load_config()
+        changed = []
+
+        # KeyboardSimulator: update in place
+        if new.input.typing_delay != old.input.typing_delay:
+            self.keyboard.typing_delay = new.input.typing_delay
+            changed.append("keyboard(typing_delay)")
+        if new.input.auto_submit != old.input.auto_submit:
+            self.keyboard.auto_submit = new.input.auto_submit
+            changed.append("keyboard(auto_submit)")
+
+        # AudioRecorder: update in place (stream opens lazily per recording)
+        if new.audio.sample_rate != old.audio.sample_rate:
+            self.recorder.sample_rate = new.audio.sample_rate
+            changed.append("audio(sample_rate)")
+        if new.audio.input_device != old.audio.input_device:
+            self.recorder.device = new.audio.input_device
+            changed.append("audio(device)")
+
+        # HotkeyListener: rebuild if hotkey, language hotkey, languages, or AFK hotkey changed
+        new_languages = [new.transcription.language]
+        if new.transcription.extra_languages:
+            new_languages += new.transcription.extra_languages
+        hotkey_changed = (
+            new.input.hotkey != old.input.hotkey
+            or new.input.language_hotkey != old.input.language_hotkey
+            or new_languages != self._languages
+            or new.afk.hotkey != old.afk.hotkey
+        )
+        if hotkey_changed:
+            self.hotkey_listener.stop()
+            self._languages = new_languages
+            self.hotkey_listener = HotkeyListener(
+                hotkey=new.input.hotkey,
+                on_press=self._on_hotkey_press,
+                on_release=self._on_hotkey_release,
+                language_hotkey=new.input.language_hotkey,
+                languages=self._languages,
+                on_language_change=self._on_language_change,
+                combo_hotkey=new.afk.hotkey,
+                on_combo=self._toggle_afk,
+            )
+            self.hotkey_listener.start()
+            changed.append("hotkey_listener")
+
+        # Transcriber: reset model if model name or backend changed
+        if (new.transcription.model != old.transcription.model
+                or new.transcription.backend != old.transcription.backend):
+            self.transcriber._model = None
+            self.transcriber.model_name = new.transcription.model
+            self.transcriber.backend = new.transcription.backend
+            self.transcriber.device = new.transcription.device
+            changed.append("transcriber(model reset)")
+        elif new.transcription.device != old.transcription.device:
+            self.transcriber.device = new.transcription.device
+            changed.append("transcriber(device)")
+
+        # TranscriptionCleaner: recreate if settings changed, destroy if disabled
+        if new.input.transcription_cleanup:
+            if (not old.input.transcription_cleanup
+                    or new.input.cleanup_model != old.input.cleanup_model
+                    or new.input.debug != old.input.debug):
+                self.cleaner = TranscriptionCleaner(
+                    model_name=new.input.cleanup_model,
+                    debug=new.input.debug,
+                )
+                changed.append("cleaner(recreated)")
+        elif old.input.transcription_cleanup:
+            self.cleaner = None
+            changed.append("cleaner(disabled)")
+
+        # Overlay: re-init if colors or style changed
+        overlay_changed = (
+            new.overlay.recording_color != old.overlay.recording_color
+            or new.overlay.transcribing_color != old.overlay.transcribing_color
+            or new.overlay.style != old.overlay.style
+        )
+        if overlay_changed and new.overlay.enabled:
+            from daemon import overlay
+            overlay.init(
+                recording_color=new.overlay.recording_color,
+                transcribing_color=new.overlay.transcribing_color,
+                style=new.overlay.style,
+            )
+            changed.append("overlay")
+
+        # AfkManager: recreate with new config
+        if (new.afk.telegram.bot_token != old.afk.telegram.bot_token
+                or new.afk.telegram.chat_id != old.afk.telegram.chat_id):
+            was_active = self.afk.active
+            self.afk.stop_listening()
+            self.afk = AfkManager(new)
+            if self.afk.is_configured:
+                self.afk.start_listening(on_toggle=self._toggle_afk)
+            if was_active:
+                self.afk.activate()
+            changed.append("afk")
+
+        self.config = new
+        summary = ", ".join(changed) if changed else "no components changed"
+        print(f"Config reloaded: {summary}")
 
     def _on_language_change(self, lang: str) -> None:
         """Called when language is cycled."""
