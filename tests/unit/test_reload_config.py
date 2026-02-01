@@ -217,6 +217,114 @@ class TestReloadHotkey:
         assert kwargs[1]["on_language_change"] == d._on_language_change
         assert kwargs[1]["on_combo"] == d._toggle_afk
 
+    def test_speech_hotkey_change_rebuilds_listener(self):
+        d = _make_daemon()
+        old_listener = d.hotkey_listener
+        new_cfg = _default_config(speech=SpeechConfig(hotkey="right_alt+v"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.HotkeyListener") as MockHL:
+            MockHL.return_value = MagicMock()
+            d.reload_config()
+
+        old_listener.stop.assert_called_once()
+        MockHL.assert_called_once()
+        MockHL.return_value.start.assert_called_once()
+
+    def test_speech_hotkey_passed_to_listener(self):
+        d = _make_daemon()
+        new_cfg = _default_config(speech=SpeechConfig(hotkey="right_alt+v"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.HotkeyListener") as MockHL:
+            MockHL.return_value = MagicMock()
+            d.reload_config()
+
+        kwargs = MockHL.call_args[1]
+        assert kwargs["combo_hotkey_2"] == "right_alt+v"
+        assert kwargs["on_combo_2"] == d._toggle_voice
+
+    def test_speech_hotkey_none_does_not_trigger_rebuild(self):
+        """When speech.hotkey stays at default, no rebuild needed."""
+        cfg = _default_config()
+        d = _make_daemon(cfg)
+        old_listener = d.hotkey_listener
+
+        with patch("daemon.main.load_config", return_value=deepcopy(cfg)):
+            d.reload_config()
+
+        old_listener.stop.assert_not_called()
+        assert d.hotkey_listener is old_listener
+
+
+class TestToggleVoice:
+
+    def test_toggle_voice_disables_when_enabled(self):
+        d = _make_daemon()
+        d.control_server = MagicMock()
+        with patch.object(d, 'get_voice_enabled', return_value=True), \
+             patch.object(d, 'set_voice_enabled') as mock_set:
+            d._toggle_voice()
+        mock_set.assert_called_once_with(False)
+
+    def test_toggle_voice_enables_when_disabled(self):
+        d = _make_daemon()
+        d.control_server = MagicMock()
+        with patch.object(d, 'get_voice_enabled', return_value=False), \
+             patch.object(d, 'set_voice_enabled') as mock_set:
+            d._toggle_voice()
+        mock_set.assert_called_once_with(True)
+
+    def test_toggle_voice_emits_event(self):
+        d = _make_daemon()
+        d.control_server = MagicMock()
+        with patch.object(d, 'get_voice_enabled', return_value=True), \
+             patch.object(d, 'set_voice_enabled'):
+            d._toggle_voice()
+        d.control_server.emit.assert_called_once_with(
+            {"event": "voice_changed", "enabled": False}
+        )
+
+    def test_toggle_voice_on_plays_ascending_cue(self):
+        d = _make_daemon()
+        d.control_server = MagicMock()
+        with patch.object(d, 'get_voice_enabled', return_value=False), \
+             patch.object(d, 'set_voice_enabled'), \
+             patch("daemon.main._play_cue") as mock_cue:
+            d._toggle_voice()
+        from daemon.main import CUE_ASCENDING
+        mock_cue.assert_called_once_with(CUE_ASCENDING)
+
+    def test_toggle_voice_off_plays_descending_cue(self):
+        d = _make_daemon()
+        d.control_server = MagicMock()
+        with patch.object(d, 'get_voice_enabled', return_value=True), \
+             patch.object(d, 'set_voice_enabled'), \
+             patch("daemon.main._play_cue") as mock_cue:
+            d._toggle_voice()
+        from daemon.main import CUE_DESCENDING
+        mock_cue.assert_called_once_with(CUE_DESCENDING)
+
+    def test_toggle_voice_on_shows_overlay_flash(self):
+        d = _make_daemon()
+        d.control_server = MagicMock()
+        with patch.object(d, 'get_voice_enabled', return_value=False), \
+             patch.object(d, 'set_voice_enabled'), \
+             patch("daemon.main._play_cue"), \
+             patch("daemon.overlay.show_flash") as mock_flash:
+            d._toggle_voice()
+        mock_flash.assert_called_once_with("VOICE ON")
+
+    def test_toggle_voice_off_shows_overlay_flash(self):
+        d = _make_daemon()
+        d.control_server = MagicMock()
+        with patch.object(d, 'get_voice_enabled', return_value=True), \
+             patch.object(d, 'set_voice_enabled'), \
+             patch("daemon.main._play_cue"), \
+             patch("daemon.overlay.show_flash") as mock_flash:
+            d._toggle_voice()
+        mock_flash.assert_called_once_with("VOICE OFF")
+
 
 class TestReloadTranscriber:
 

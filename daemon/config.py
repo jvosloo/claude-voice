@@ -52,6 +52,7 @@ class SpeechConfig:
     skip_code_blocks: bool = True
     skip_tool_results: bool = True
     notify_phrases: Optional[dict] = None  # Custom phrase overrides
+    hotkey: Optional[str] = "left_alt+v"   # Toggle voice on/off
 
 @dataclass
 class AudioConfig:

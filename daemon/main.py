@@ -138,6 +138,8 @@ class VoiceDaemon:
             on_language_change=self._on_language_change,
             combo_hotkey=self.config.afk.hotkey,
             on_combo=self._toggle_afk,
+            combo_hotkey_2=self.config.speech.hotkey,
+            on_combo_2=self._toggle_voice,
         )
 
         self.tts_engine = TTSEngine()
@@ -203,6 +205,7 @@ class VoiceDaemon:
             or new.input.language_hotkey != old.input.language_hotkey
             or new_languages != self._languages
             or new.afk.hotkey != old.afk.hotkey
+            or new.speech.hotkey != old.speech.hotkey
         )
         if hotkey_changed:
             self.hotkey_listener.stop()
@@ -216,6 +219,8 @@ class VoiceDaemon:
                 on_language_change=self._on_language_change,
                 combo_hotkey=new.afk.hotkey,
                 on_combo=self._toggle_afk,
+                combo_hotkey_2=new.speech.hotkey,
+                on_combo_2=self._toggle_voice,
             )
             self.hotkey_listener.start()
             changed.append("hotkey_listener")
@@ -390,6 +395,17 @@ class VoiceDaemon:
             self._deactivate_afk()
         else:
             self._activate_afk()
+
+    def _toggle_voice(self) -> None:
+        """Toggle voice output on/off via speech hotkey."""
+        from daemon import overlay
+        enabled = not self.get_voice_enabled()
+        self.set_voice_enabled(enabled)
+        _play_cue(CUE_ASCENDING if enabled else CUE_DESCENDING)
+        overlay.show_flash("VOICE ON" if enabled else "VOICE OFF")
+        print(f"Voice output {'enabled' if enabled else 'disabled'} (hotkey)")
+        if hasattr(self, 'control_server'):
+            self.control_server.emit({"event": "voice_changed", "enabled": enabled})
 
     def _run_tts_server(self) -> None:
         """Run Unix socket server for TTS requests from the hook."""

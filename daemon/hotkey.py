@@ -39,6 +39,8 @@ class HotkeyListener:
         on_language_change: Optional[Callable[[str], None]] = None,
         combo_hotkey: Optional[str] = None,
         on_combo: Optional[Callable[[], None]] = None,
+        combo_hotkey_2: Optional[str] = None,
+        on_combo_2: Optional[Callable[[], None]] = None,
     ):
         self.hotkey = KEY_MAP.get(hotkey, keyboard.Key.alt_r)
         self.on_press = on_press
@@ -65,6 +67,16 @@ class HotkeyListener:
                 # changing the character (e.g. a -> å) don't break matching
                 self._combo_vk = _MACOS_CHAR_TO_VK.get(parts[1].lower())
 
+        # Second combo hotkey (e.g. speech toggle)
+        self._combo_modifier_2 = None
+        self._combo_vk_2 = None
+        self._on_combo_2 = on_combo_2
+        if combo_hotkey_2 and "+" in combo_hotkey_2:
+            parts = combo_hotkey_2.split("+")
+            if len(parts) == 2:
+                self._combo_modifier_2 = KEY_MAP.get(parts[0])
+                self._combo_vk_2 = _MACOS_CHAR_TO_VK.get(parts[1].lower())
+
     @property
     def active_language(self) -> str:
         return self._languages[self._language_index]
@@ -82,6 +94,11 @@ class HotkeyListener:
             vk = getattr(key, 'vk', None)
             if vk is not None and vk == self._combo_vk:
                 self._on_combo()
+        if (self._combo_modifier_2 and self._on_combo_2
+                and self._combo_modifier_2 in self._pressed_keys):
+            vk = getattr(key, 'vk', None)
+            if vk is not None and vk == self._combo_vk_2:
+                self._on_combo_2()
 
     def _handle_release(self, key) -> None:
         """Handle key release event."""
