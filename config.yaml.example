@@ -15,9 +15,9 @@ transcription:
   device: "cpu"                # cpu or cuda (for faster-whisper)
   backend: "mlx"               # "faster-whisper" or "mlx" (mlx is faster on Apple Silicon)
   extra_languages: ["af"]        # Additional languages to cycle through (e.g. ["af", "de"])
-  # word_replacements:            # Fix consistently misheard words (case-insensitive, whole-word)
-  #   "taste": "test"             # Key = what Whisper hears, Value = what you actually said
-  #   "clothes code": "Claude Code"
+  word_replacements:              # Fix consistently misheard words (case-insensitive, whole-word)
+    "clawd": "Claude"             # Key = what Whisper hears, Value = what you actually said
+    # "clothes code": "Claude Code"
 
 speech:
   enabled: true                # Set to false to disable TTS output
@@ -32,6 +32,7 @@ speech:
   max_chars: null              # Limit spoken output (null = unlimited)
   skip_code_blocks: true       # Don't speak code blocks
   skip_tool_results: true      # Don't speak tool output
+  hotkey: "left_alt+v"         # Combo hotkey to toggle voice on/off (null to disable)
 
 audio:
   input_device: null           # null = system default

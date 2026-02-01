@@ -65,9 +65,9 @@ Communication flows:
 
 `main.py` contains `VoiceDaemon`, the main orchestrator. It wires together:
 
-- **HotkeyListener** (`hotkey.py`) — push-to-talk via pynput, language cycling, AFK combo hotkey
+- **HotkeyListener** (`hotkey.py`) — push-to-talk via pynput, language cycling, AFK combo hotkey, speech toggle combo hotkey
 - **AudioRecorder** (`audio.py`) — records via sounddevice, opens/closes stream per recording to control the macOS mic indicator
-- **Transcriber** (`transcribe.py`) — Whisper STT with two backends: MLX (Apple Silicon) and faster-whisper (CPU)
+- **Transcriber** (`transcribe.py`) — Whisper STT with two backends: MLX (Apple Silicon) and faster-whisper (CPU). Also contains `apply_word_replacements()` for post-transcription corrections
 - **TTSEngine** (`tts.py`) — Kokoro neural TTS via mlx-audio
 - **Overlay** (`overlay.py`) — floating macOS window (PyObjC/Cocoa/Quartz) with animated waveform, transcription dots, state indicators. Runs on the Cocoa NSRunLoop on the main thread
 - **ControlServer** (`control.py`) — Unix socket server for JSON command/response protocol
@@ -116,6 +116,8 @@ YAML-based at `~/.claude-voice/config.yaml` (see `config.yaml.example` for all o
 - **Hooks fail silently:** if the daemon isn't running, hooks exit gracefully rather than erroring
 - **Config backward compat:** `load_config()` strips removed keys (e.g., `notify_model`) so old configs don't crash
 - **Voice commands:** transcribed text is checked for command phrases ("stop speaking", "switch to narrate mode", etc.) before being typed
+- **Word replacements:** `transcription.word_replacements` applies deterministic regex-based corrections after Whisper, before LLM cleanup. Case-insensitive whole-word matching via `\b` boundaries. Applied passively from config on each transcription — no special reload logic needed
+- **Speech toggle hotkey:** `speech.hotkey` (default `left_alt+v`) toggles voice on/off via a second combo hotkey slot in `HotkeyListener`. Plays audio cues, flashes overlay, and broadcasts `voice_changed` events
 
 ## Settings App Coordination
 

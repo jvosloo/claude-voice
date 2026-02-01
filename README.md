@@ -8,6 +8,30 @@ When used with Claude Code, two voice output modes are available:
 
 **Platform:** macOS (uses `afplay` for audio playback)
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Commands](#commands)
+  - [Voice Input](#voice-input-works-anywhere)
+  - [With Claude Code](#with-claude-code-two-way-voice)
+  - [Multilingual Dictation](#multilingual-dictation)
+  - [Voice Toggle Hotkey](#voice-toggle-hotkey)
+  - [Voice Commands](#voice-commands)
+  - [AFK Mode](#afk-mode)
+- [Setup](#setup)
+- [Configuration](#configuration)
+  - [Speech Settings](#speech-settings-tts-output)
+  - [Transcription Settings](#transcription-settings)
+  - [Word Replacements](#word-replacements)
+  - [Input Settings](#input-settings)
+  - [Audio Settings](#audio-settings)
+- [Available Voices](#available-voices)
+- [Testing](#testing)
+- [Development](#development)
+- [Components](#components)
+
 ---
 
 ## Prerequisites
@@ -105,6 +129,10 @@ transcription:
 - Tap the language hotkey to cycle languages — the overlay flashes the active language code (e.g. "AF")
 - Hold the recording hotkey to dictate in the active language — the overlay pill shows the language code when not using the default
 
+### Voice Toggle Hotkey
+
+Press **Left Alt + V** to toggle voice output on/off. You'll hear ascending tones when voice is enabled and descending tones when disabled, with an overlay flash confirming the change. Configure via `speech.hotkey` in config.yaml (set to `null` to disable).
+
 ### Voice Commands
 
 Say these phrases to toggle voice output without leaving Claude:
@@ -200,6 +228,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `skip_code_blocks` | `true` | Don't speak code blocks |
 | `skip_tool_results` | `true` | Don't speak tool result output |
 | `notify_phrases` | *(defaults)* | Custom phrase overrides per category (permission, done) |
+| `hotkey` | `left_alt+v` | Combo hotkey to toggle voice on/off (`null` to disable) |
 
 ### Transcription Settings
 
@@ -210,6 +239,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `language` | `en` | Default language code |
 | `extra_languages` | `[]` | Additional languages to cycle through (e.g. `["af", "de"]`) |
 | `device` | `cpu` | Compute device for faster-whisper: `cpu` or `cuda` |
+| `word_replacements` | `{}` | Fix consistently misheard words (see below) |
 
 **Available models:**
 
@@ -224,6 +254,19 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 **Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast.
 
 **Note:** The `.en` models (e.g. `base.en`) only support English. To use `extra_languages`, you need a multilingual model like `large-v3`.
+
+### Word Replacements
+
+Fix words that Whisper consistently gets wrong. Replacements are case-insensitive and match whole words only (so "taste" won't match "aftertaste"). Multi-word phrases are supported.
+
+```yaml
+transcription:
+  word_replacements:
+    "clawd": "Claude"              # included by default
+    "clothes code": "Claude Code"
+```
+
+Replacements are applied immediately after transcription, before any LLM cleanup. Changes take effect on the next recording after `reload_config`.
 
 ### Input Settings
 
