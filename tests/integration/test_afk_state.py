@@ -105,3 +105,15 @@ class TestHandleMessage:
         with patch.object(mgr, "handle_status_request") as mock_status:
             mgr._handle_message("/status")
         mock_status.assert_called_once()
+
+    def test_help_command(self):
+        mgr = AfkManager(_make_config())
+        mgr._client = MagicMock()
+        mgr._client.send_message.return_value = 1
+        mgr._handle_message("/help")
+        mgr._client.send_message.assert_called_once()
+        text = mgr._client.send_message.call_args[0][0]
+        assert "/afk" in text
+        assert "/back" in text
+        assert "/queue" in text
+        assert "Commands" in text

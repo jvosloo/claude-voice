@@ -345,6 +345,10 @@ class AfkManager:
             self._handle_queue_command("skip")
             return
 
+        if cmd == "/help":
+            self._send_help()
+            return
+
         # Not in AFK mode
         if not self.active:
             if self._presenter:
@@ -511,6 +515,28 @@ class AfkManager:
 
         text, markup = self._presenter.format_queue_summary(summary)
         self._presenter.send_to_session("", text, markup)
+
+    def _send_help(self) -> None:
+        """Send help message listing available commands."""
+        self._send(
+            "<b>AFK Mode — Help</b>\n"
+            "\n"
+            "Respond to Claude Code remotely via Telegram.\n"
+            "Permission requests, input prompts, and questions\n"
+            "appear here. Reply with buttons or free text.\n"
+            "\n"
+            "<b>Commands:</b>\n"
+            "/afk — toggle AFK mode on/off\n"
+            "/back — deactivate AFK mode\n"
+            "/status — show active sessions\n"
+            "/queue — show pending requests\n"
+            "/skip — skip current request\n"
+            "/flush — clear all pending requests\n"
+            "/help — show this message\n"
+            "\n"
+            "When a request is active, any text you type is\n"
+            "sent as the reply."
+        )
 
     def _inject_reply(self, session: str, text: str) -> bool:
         """Inject text + Enter into the terminal via osascript keystroke simulation.

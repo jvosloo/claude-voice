@@ -23,7 +23,7 @@ Deploy changes from `/Users/johan/IdeaProjects/claude-voice` (project repo) to `
 | Command | Purpose |
 |---------|---------|
 | `./deploy.sh` | Smart deploy - only copies changed files |
-| `pkill -f claude-voice-daemon && claude-voice-daemon &` | Restart daemon |
+| `claude-voice-daemon restart` | Restart daemon |
 | `ls -l ~/.claude/hooks/*.py` | Verify hooks are executable |
 
 ## Deployment Process
@@ -50,8 +50,7 @@ chmod +x ~/.claude/hooks/*.py
 ### 3. Restart Daemon (if daemon files changed)
 
 ```bash
-pkill -f claude-voice-daemon
-claude-voice-daemon &
+claude-voice-daemon restart
 ```
 
 ### 4. Verify Deployment
@@ -59,7 +58,7 @@ claude-voice-daemon &
 Run a quick test:
 ```bash
 # Check daemon is running
-ps aux | grep claude-voice-daemon
+claude-voice-daemon status
 
 # For hook changes, test in a Claude Code session
 # Trigger the hook and verify behavior
@@ -77,7 +76,7 @@ ps aux | grep claude-voice-daemon
 | Mistake | Fix |
 |---------|-----|
 | Forgot to deploy | Run `./deploy.sh` after every code change |
-| Daemon using old code | Restart daemon with `pkill -f claude-voice-daemon && claude-voice-daemon &` |
+| Daemon using old code | Restart daemon with `claude-voice-daemon restart` |
 | Hook not executable | `chmod +x ~/.claude/hooks/*.py` |
 | Deployed but didn't test | Always verify with quick test after deployment |
 
@@ -92,8 +91,7 @@ cp hooks/*.py ~/.claude/hooks/
 chmod +x ~/.claude/hooks/*.py
 
 # Restart daemon
-pkill -f claude-voice-daemon
-claude-voice-daemon &
+claude-voice-daemon restart
 ```
 
 ## Red Flags - Missing Steps
