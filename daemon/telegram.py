@@ -70,18 +70,6 @@ class TelegramClient:
         except Exception:
             pass
 
-    def delete_message(self, message_id: int) -> bool:
-        """Delete a message. Returns True on success."""
-        try:
-            resp = requests.post(
-                f"{self._base_url}/deleteMessage",
-                json={"chat_id": self.chat_id, "message_id": message_id},
-                timeout=REQUEST_TIMEOUT_SHORT,
-            )
-            return resp.json().get("ok", False)
-        except Exception:
-            return False
-
     def edit_message_text(self, message_id: int, text: str,
                           reply_markup: dict | None = None) -> bool:
         """Edit the text of an existing message. Returns True on success."""

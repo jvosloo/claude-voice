@@ -128,3 +128,13 @@ class RequestQueue:
             })
 
         return summary
+
+    def clear(self) -> list[QueuedRequest]:
+        """Remove all requests (active + queued). Returns the removed requests."""
+        removed = []
+        if self._active:
+            removed.append(self._active)
+            self._active = None
+        removed.extend(self._queue)
+        self._queue.clear()
+        return removed

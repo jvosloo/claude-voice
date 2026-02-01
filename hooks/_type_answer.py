@@ -219,6 +219,10 @@ def main():
             debug("Timed out waiting for response")
             return
 
+        if answer == "__flush__":
+            debug("Queue flushed, exiting")
+            return
+
         debug(f"Got answer: {answer}")
 
         # Handle skip — user tapped "Skip / Other" button, let them answer locally

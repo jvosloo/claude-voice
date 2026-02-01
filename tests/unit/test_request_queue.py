@@ -176,3 +176,56 @@ class TestRequestQueueSessionMetadata:
         assert summary[2]['session'] == 'sess-a'
         assert summary[2]['status'] == 'queued'
         assert summary[2]['position'] == 2
+
+
+class TestRequestQueueClear:
+
+    def test_clear_empty_queue_returns_empty(self):
+        """Clear on empty queue returns empty list."""
+        queue = RequestQueue()
+
+        removed = queue.clear()
+
+        assert removed == []
+        assert queue.get_active() is None
+        assert queue.size() == 0
+
+    def test_clear_active_only(self):
+        """Clear with only active request returns it."""
+        queue = RequestQueue()
+        req = QueuedRequest("s1", "permission", "Test", "/tmp/r")
+        queue.enqueue(req)
+
+        removed = queue.clear()
+
+        assert removed == [req]
+        assert queue.get_active() is None
+
+    def test_clear_active_and_queued(self):
+        """Clear returns active + all queued requests in order."""
+        queue = RequestQueue()
+        req1 = QueuedRequest("s1", "permission", "Test 1", "/tmp/r1")
+        req2 = QueuedRequest("s2", "input", "Test 2", "/tmp/r2")
+        req3 = QueuedRequest("s3", "permission", "Test 3", "/tmp/r3")
+        queue.enqueue(req1)
+        queue.enqueue(req2)
+        queue.enqueue(req3)
+
+        removed = queue.clear()
+
+        assert removed == [req1, req2, req3]
+        assert queue.get_active() is None
+        assert queue.size() == 0
+
+    def test_clear_allows_new_enqueue(self):
+        """After clear, new enqueue becomes active."""
+        queue = RequestQueue()
+        req1 = QueuedRequest("s1", "permission", "Test 1", "/tmp/r1")
+        queue.enqueue(req1)
+        queue.clear()
+
+        req2 = QueuedRequest("s2", "input", "Test 2", "/tmp/r2")
+        result = queue.enqueue(req2)
+
+        assert result == "active"
+        assert queue.get_active() == req2

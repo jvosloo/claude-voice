@@ -81,31 +81,6 @@ class TestSendMessage:
             assert client.send_message("Hello") is None
 
 
-class TestDeleteMessage:
-
-    def test_success(self):
-        client = _make_client()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"ok": True}
-
-        with patch("daemon.telegram.requests.post", return_value=mock_resp):
-            assert client.delete_message(42) is True
-
-    def test_failure(self):
-        client = _make_client()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"ok": False}
-
-        with patch("daemon.telegram.requests.post", return_value=mock_resp):
-            assert client.delete_message(42) is False
-
-    def test_exception(self):
-        client = _make_client()
-        with patch("daemon.telegram.requests.post",
-                   side_effect=ConnectionError()):
-            assert client.delete_message(42) is False
-
-
 class TestHandleUpdate:
 
     def test_routes_callback_to_handler(self):

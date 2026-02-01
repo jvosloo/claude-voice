@@ -451,3 +451,112 @@ class TestCleanupSession:
             afk.cleanup_session("sess-a")
 
         assert afk._reply_target == "sess-b"
+
+
+class TestDeactivateFlush:
+
+    def test_deactivate_flushes_pending_requests(self):
+        """deactivate() writes __flush__ sentinel to all pending response paths."""
+        afk = _make_afk()
+        req1 = QueuedRequest("s1", "permission", "Test 1", "/tmp/r1")
+        req2 = QueuedRequest("s2", "input", "Test 2", "/tmp/r2")
+        afk._queue.enqueue(req1)
+        afk._queue.enqueue(req2)
+
+        with patch.object(afk, '_write_response') as mock_write:
+            afk.deactivate()
+
+        # Should write __flush__ to both response paths
+        assert mock_write.call_count == 2
+        mock_write.assert_any_call("/tmp/r1", "__flush__")
+        mock_write.assert_any_call("/tmp/r2", "__flush__")
+
+    def test_deactivate_clears_session_state(self):
+        """deactivate() clears contexts, tty_paths, and reply_target."""
+        afk = _make_afk()
+        afk._session_contexts["s1"] = "some context"
+        afk._session_tty_paths["s1"] = "/dev/ttys005"
+        afk._reply_target = "s1"
+
+        afk.deactivate()
+
+        assert afk._session_contexts == {}
+        assert afk._session_tty_paths == {}
+        assert afk._reply_target is None
+
+    def test_deactivate_goodbye_includes_flush_count(self):
+        """Goodbye message includes flush count when requests were pending."""
+        afk = _make_afk()
+        req1 = QueuedRequest("s1", "permission", "Test", "/tmp/r1")
+        req2 = QueuedRequest("s2", "input", "Test", "/tmp/r2")
+        req3 = QueuedRequest("s3", "input", "Test", "/tmp/r3")
+        afk._queue.enqueue(req1)
+        afk._queue.enqueue(req2)
+        afk._queue.enqueue(req3)
+
+        with patch.object(afk, '_write_response'):
+            afk.deactivate()
+
+        msg = afk._client.send_message.call_args[0][0]
+        assert "Flushed 3" in msg
+
+    def test_deactivate_no_flush_count_when_empty(self):
+        """Goodbye message is simple when no pending requests."""
+        afk = _make_afk()
+
+        afk.deactivate()
+
+        msg = afk._client.send_message.call_args[0][0]
+        assert "Flushed" not in msg
+        assert "AFK mode off" in msg
+
+
+class TestFlushCommand:
+
+    def test_flush_command_clears_queue(self):
+        """The /flush command writes sentinels and reports count."""
+        afk = _make_afk()
+        req1 = QueuedRequest("s1", "permission", "Test", "/tmp/r1")
+        req2 = QueuedRequest("s2", "input", "Test", "/tmp/r2")
+        afk._queue.enqueue(req1)
+        afk._queue.enqueue(req2)
+
+        with patch.object(afk, '_write_response') as mock_write:
+            afk._handle_message("/flush")
+
+        # Sentinel written to both
+        mock_write.assert_any_call("/tmp/r1", "__flush__")
+        mock_write.assert_any_call("/tmp/r2", "__flush__")
+        # Report sent
+        msg = afk._client.send_message.call_args[0][0]
+        assert "Flushed 2" in msg
+
+    def test_flush_command_empty_queue(self):
+        """/flush with empty queue reports 0."""
+        afk = _make_afk()
+
+        afk._handle_message("/flush")
+
+        msg = afk._client.send_message.call_args[0][0]
+        assert "Flushed 0" in msg
+
+
+class TestStaleButtonFeedback:
+
+    def test_stale_button_shows_expired_toast(self):
+        """Pressing a button for an expired request shows 'Request expired'."""
+        afk = _make_afk()
+        afk._router.route_button_press = Mock(return_value=None)
+
+        afk._handle_callback("cb_1", "yes", 999)
+
+        afk._client.answer_callback.assert_called_once_with("cb_1", text="Request expired")
+
+    def test_stale_button_strips_markup(self):
+        """Pressing a stale button removes inline keyboard from the message."""
+        afk = _make_afk()
+        afk._router.route_button_press = Mock(return_value=None)
+
+        afk._handle_callback("cb_1", "yes", 999)
+
+        afk._client.edit_message_reply_markup.assert_called_once_with(999)

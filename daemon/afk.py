@@ -30,16 +30,12 @@ class AfkManager:
         self._session_contexts = {}  # session -> last known context string
         self._session_tty_paths = {}  # session -> TTY device path (e.g. /dev/ttys005)
         self._reply_target = None  # session that next free text reply goes to
-        self._sent_message_ids = []  # track all sent message IDs for /clear
         self._previous_mode = None  # mode before AFK was activated
         self._on_toggle = None  # callback for /afk command
 
     def _send(self, text: str, reply_markup: dict | None = None) -> int | None:
-        """Send a Telegram message and track its ID for /clear."""
-        msg_id = self._client.send_message(text, reply_markup=reply_markup)
-        if msg_id:
-            self._sent_message_ids.append(msg_id)
-        return msg_id
+        """Send a Telegram message."""
+        return self._client.send_message(text, reply_markup=reply_markup)
 
     @property
     def is_configured(self) -> bool:
@@ -106,9 +102,15 @@ class AfkManager:
             return
 
         self.active = False
-        self._sent_message_ids.clear()
+        flushed = self._flush_queue()
+        self._session_contexts.clear()
+        self._session_tty_paths.clear()
+        self._reply_target = None
         if self._client:
-            self._send("AFK mode off. Send /afk to reactivate.")
+            if flushed:
+                self._send(f"AFK mode off. Flushed {flushed} pending request(s). Send /afk to reactivate.")
+            else:
+                self._send("AFK mode off. Send /afk to reactivate.")
 
     def handle_hook_request(self, request: dict) -> dict:
         """Handle a request from a hook. Returns response for the hook.
@@ -224,29 +226,31 @@ class AfkManager:
 
         self._send("\n".join(lines))
 
-    def _handle_clear(self) -> None:
-        """Handle /clear command - delete all tracked bot messages."""
-        deleted = 0
-        for msg_id in self._sent_message_ids:
-            if self._client.delete_message(msg_id):
-                deleted += 1
-        self._sent_message_ids.clear()
-        self._send(f"Cleared {deleted} messages.")
+    def _flush_queue(self) -> int:
+        """Flush all pending requests. Writes __flush__ sentinel so hooks stop waiting.
+
+        Returns the number of flushed requests.
+        """
+        removed = self._queue.clear()
+        for req in removed:
+            self._write_response(req.response_path, "__flush__")
+        return len(removed)
 
     def _handle_callback(self, callback_id: str, data: str, message_id: int | None) -> None:
         """Handle an inline button press from Telegram."""
         print(f"AFK: callback received: data={data!r}, msg_id={message_id}, "
               f"queue_active={self._queue.get_active() is not None}")
-        self._client.answer_callback(callback_id, text=f"Sent: {data}")
 
         # Queue management commands work from any message (e.g., /queue summary)
         if data.startswith("cmd:"):
+            self._client.answer_callback(callback_id, text=f"Sent: {data}")
             self._client.edit_message_reply_markup(message_id)
             self._handle_queue_command(data[4:])
             return
 
         # Reply button on context messages
         if data.startswith("reply:"):
+            self._client.answer_callback(callback_id, text=f"Sent: {data}")
             target_session = data[6:]
             self._reply_target = target_session
             has_tty = target_session in self._session_tty_paths
@@ -268,7 +272,11 @@ class AfkManager:
         pending = self._router.route_button_press(data, message_id)
 
         if not pending:
+            self._client.answer_callback(callback_id, text="Request expired")
+            self._client.edit_message_reply_markup(message_id)
             return
+
+        self._client.answer_callback(callback_id, text=f"Sent: {data}")
 
         # Remove buttons from the message
         self._client.edit_message_reply_markup(message_id)
@@ -324,8 +332,9 @@ class AfkManager:
             self.handle_status_request()
             return
 
-        if cmd == "/clear":
-            self._handle_clear()
+        if cmd == "/flush":
+            flushed = self._flush_queue()
+            self._send(f"Flushed {flushed} pending request(s).")
             return
 
         if cmd == "/queue":
@@ -428,7 +437,6 @@ class AfkManager:
         # Store message_id for routing
         if msg_id:
             active.message_id = msg_id
-            self._sent_message_ids.append(msg_id)
 
     def _send_queued_notification(self, req: QueuedRequest) -> None:
         """Send notification that request was queued."""
