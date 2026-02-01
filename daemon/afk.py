@@ -1,13 +1,10 @@
 """AFK mode manager - bridges Claude Code sessions to Telegram."""
 
-import json
 import os
 import subprocess
-import sys
-import threading
 import time
 
-from daemon.telegram import TelegramClient, make_options_keyboard, make_permission_keyboard
+from daemon.telegram import TelegramClient
 from daemon.request_queue import RequestQueue, QueuedRequest
 from daemon.request_router import QueueRouter
 from daemon.session_presenter import SingleChatPresenter
@@ -18,19 +15,6 @@ RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
 # Telegram message limit (4096 max, reserve space for header/buttons/HTML)
 TELEGRAM_MAX_CHARS = 3900
 
-class PendingRequest:
-    """A request from a hook waiting for a Telegram response."""
-
-    def __init__(self, session: str, req_type: str, prompt: str,
-                 message_id: int | None = None, response_path: str = ""):
-        self.session = session
-        self.req_type = req_type   # "permission", "input", or "ask_user_question"
-        self.prompt = prompt
-        self.message_id = message_id
-        self.response_path = response_path
-        self.timestamp = time.time()
-
-
 class AfkManager:
     """Manages AFK mode state and Telegram communication."""
 
@@ -39,7 +23,6 @@ class AfkManager:
         self.active = False
         self._client = None
 
-        # NEW: Use abstractions
         self._queue = RequestQueue()
         self._router = None  # Set when client is created
         self._presenter = None  # Set when client is created
@@ -80,7 +63,6 @@ class AfkManager:
             self._client = None
             return False
 
-        # NEW: Initialize router and presenter
         self._router = QueueRouter(self._queue)
         self._presenter = SingleChatPresenter(self._client)
 
@@ -161,6 +143,12 @@ class AfkManager:
             self._presenter.send_to_session(session, text)
             return {"wait": False}
 
+        # Extract options from AskUserQuestion
+        options = None
+        questions = request.get("questions", [])
+        if questions:
+            options = questions[0].get("options", [])
+
         # Create response path
         response_path = self._response_path(session, suffix=req_type)
 
@@ -170,10 +158,12 @@ class AfkManager:
             req_type=req_type,
             prompt=prompt,
             response_path=response_path,
+            options=options,
         )
 
         # Enqueue request
         status = self._queue.enqueue(queued_req)
+        print(f"AFK: enqueued {req_type} from [{session}] → {status}")
 
         if status == "active":
             # Present immediately
@@ -218,6 +208,8 @@ class AfkManager:
 
     def _handle_callback(self, callback_id: str, data: str, message_id: int | None) -> None:
         """Handle an inline button press from Telegram."""
+        print(f"AFK: callback received: data={data!r}, msg_id={message_id}, "
+              f"queue_active={self._queue.get_active() is not None}")
         self._client.answer_callback(callback_id, text=f"Sent: {data}")
 
         # Route via QueueRouter
@@ -232,6 +224,13 @@ class AfkManager:
         # Handle commands (skip, show queue)
         if data.startswith("cmd:"):
             self._handle_queue_command(data[4:])
+            return
+
+        # "Other" button: don't dequeue, just prompt for free text
+        if data == "opt:__other__":
+            self._presenter.send_to_session(
+                pending.session, "Type your reply below:"
+            )
             return
 
         # Write response for the hook
@@ -249,6 +248,10 @@ class AfkManager:
 
     def _handle_message(self, text: str) -> None:
         """Handle a text message from Telegram."""
+        print(f"AFK: message received: {text!r}, "
+              f"active={self.active}, "
+              f"queue_active={self._queue.get_active() is not None}, "
+              f"queue_size={self._queue.size()}")
         cmd = text.strip().lower()
 
         # Handle commands (work regardless of AFK state)

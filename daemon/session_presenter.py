@@ -54,11 +54,12 @@ class SingleChatPresenter(SessionPresenter):
         text = "\n".join(lines)
 
         # Build button markup
-        markup = self._make_request_buttons(req.req_type, queue_size)
+        markup = self._make_request_buttons(req.req_type, queue_size, req.options)
 
         return text, markup
 
-    def _make_request_buttons(self, req_type: str, queue_size: int) -> dict:
+    def _make_request_buttons(self, req_type: str, queue_size: int,
+                               options: list = None) -> dict:
         """Create inline keyboard buttons for request type."""
         keyboard = []
 
@@ -70,8 +71,14 @@ class SingleChatPresenter(SessionPresenter):
                 {"text": "✗ No", "callback_data": "no"},
             ])
         elif req_type == "ask_user_question":
-            # Options added by caller (not in this method)
-            # For now, just add Other button
+            # Show actual option buttons if available
+            if options:
+                for opt in options:
+                    label = opt.get("label", "?")
+                    keyboard.append([
+                        {"text": label, "callback_data": f"opt:{label}"},
+                    ])
+            # Always add "Other" for free-text input
             keyboard.append([
                 {"text": "💬 Other (type reply)", "callback_data": "opt:__other__"},
             ])

@@ -11,6 +11,7 @@ class QueuedRequest:
     req_type: str  # "permission", "input", "ask_user_question"
     prompt: str
     response_path: str
+    options: list = None  # AskUserQuestion options: [{"label": "...", "description": "..."}]
     message_id: int = None
     timestamp: float = None
 

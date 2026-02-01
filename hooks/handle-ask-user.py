@@ -81,19 +81,37 @@ def main():
     except Exception:
         pass
 
+    # Capture the controlling terminal path before spawning the background
+    # process. The hook runs as a child of Claude Code's terminal, so
+    # /dev/tty resolves to the actual PTY device (e.g., /dev/ttys005).
+    # The background process uses this to inject keystrokes via TIOCSTI.
+    tty_path = None
+    try:
+        tty_fd = os.open("/dev/tty", os.O_RDONLY)
+        tty_path = os.ttyname(tty_fd)
+        os.close(tty_fd)
+        debug(f"Captured TTY path: {tty_path}")
+    except OSError as e:
+        debug(f"Could not capture TTY: {e}")
+
     # Spawn a background subprocess to wait for the Telegram response
     # and type it into the terminal. This hook returns immediately so
     # Claude Code can show the interactive prompt.
     typer_script = os.path.join(os.path.dirname(__file__), "_type_answer.py")
     first_options = questions[0].get("options", [])
     options_json = json.dumps(first_options)
-    debug(f"Spawning typer: {typer_script} with response_path={response_path}")
+
+    cmd = [sys.executable, typer_script, response_path, options_json]
+    if tty_path:
+        cmd.append(tty_path)
+
+    debug(f"Spawning typer: {typer_script} with response_path={response_path} tty={tty_path}")
     subprocess.Popen(
-        [sys.executable, typer_script, response_path, options_json],
+        cmd,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        # No start_new_session — child needs same session for TTY access
     )
 
 
