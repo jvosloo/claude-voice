@@ -146,6 +146,16 @@ def send_with_context(text: str, config: dict, raw_text: str = "") -> dict | Non
 
     session = os.path.basename(os.getcwd())
 
+    # Check if this hook has a controlling terminal. The daemon uses this
+    # to know replies can be injected via osascript for this session.
+    tty_path = None
+    try:
+        tty_fd = os.open("/dev/tty", os.O_RDONLY)
+        tty_path = os.ttyname(tty_fd)
+        os.close(tty_fd)
+    except OSError:
+        pass
+
     # Get last N lines as context (from raw text for Telegram)
     source = raw_text or text
     context_lines = source.strip().split("\n")[-10:]
@@ -163,6 +173,8 @@ def send_with_context(text: str, config: dict, raw_text: str = "") -> dict | Non
             "session": session,
             "context": context,
             "type": "context",
+            "tty_path": tty_path,
+            "terminal_app": terminal_app,
         }).encode())
         s.shutdown(socket.SHUT_WR)
         # Read response
@@ -182,6 +194,10 @@ def send_with_context(text: str, config: dict, raw_text: str = "") -> dict | Non
     return None
 
 def main():
+    # Debug: confirm hook fires
+    with open("/tmp/claude-voice/hook-debug.log", "a") as f:
+        f.write(f"{time.strftime('%H:%M:%S')} hook fired, cwd={os.getcwd()}\n")
+
     # Read hook input from stdin
     try:
         hook_input = json.load(sys.stdin)

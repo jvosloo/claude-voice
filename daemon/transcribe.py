@@ -1,8 +1,22 @@
 """Whisper transcription functionality for Claude Voice daemon."""
 
 import os
+import re
 import numpy as np
 from typing import Optional
+
+
+def apply_word_replacements(text: str, replacements: dict) -> str:
+    """Apply word replacements to transcribed text.
+
+    Uses whole-word matching (word boundaries) and case-insensitive matching.
+    Multi-word phrases are supported.
+    """
+    if not replacements or not text:
+        return text
+    for wrong, correct in replacements.items():
+        text = re.sub(r'\b' + re.escape(wrong) + r'\b', correct, text, flags=re.IGNORECASE)
+    return text
 
 class Transcriber:
     """Transcribes audio using Whisper (faster-whisper or MLX backend)."""

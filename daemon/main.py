@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.expanduser("~/.claude-voice"))
 from daemon.config import load_config
 from daemon.control import ControlServer
 from daemon.audio import AudioRecorder
-from daemon.transcribe import Transcriber
+from daemon.transcribe import Transcriber, apply_word_replacements
 from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
 from daemon.cleanup import TranscriptionCleaner
@@ -420,6 +420,9 @@ class VoiceDaemon:
                         break
                     data += chunk
 
+                if not data:
+                    continue
+
                 request = json.loads(data.decode())
 
                 # Check if this is an AFK-eligible request
@@ -488,6 +491,14 @@ class VoiceDaemon:
             overlay.hide()
             print("No speech detected")
             return
+
+        # Apply word replacements (deterministic, before LLM cleanup)
+        if self.config.transcription.word_replacements:
+            replaced = apply_word_replacements(text, self.config.transcription.word_replacements)
+            if replaced != text:
+                print(f"Whisper:   {text}")
+                print(f"Replaced:  {replaced}")
+                text = replaced
 
         # Clean up transcription if enabled
         if self.cleaner:

@@ -82,6 +82,27 @@ class TelegramClient:
         except Exception:
             return False
 
+    def edit_message_text(self, message_id: int, text: str,
+                          reply_markup: dict | None = None) -> bool:
+        """Edit the text of an existing message. Returns True on success."""
+        try:
+            payload = {
+                "chat_id": self.chat_id,
+                "message_id": message_id,
+                "text": text,
+                "parse_mode": "HTML",
+            }
+            if reply_markup:
+                payload["reply_markup"] = json.dumps(reply_markup)
+            resp = requests.post(
+                f"{self._base_url}/editMessageText",
+                json=payload,
+                timeout=REQUEST_TIMEOUT_SHORT,
+            )
+            return resp.json().get("ok", False)
+        except Exception:
+            return False
+
     def edit_message_reply_markup(self, message_id: int, reply_markup: dict | None = None) -> None:
         """Edit the reply markup of a sent message (e.g., remove buttons after press)."""
         try:

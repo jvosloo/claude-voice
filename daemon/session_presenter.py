@@ -102,7 +102,7 @@ class SingleChatPresenter(SessionPresenter):
         active_type = queue_info.get('active_type', 'request')
 
         lines = [
-            f"⏸️ QUEUED (position {position}/{total})",
+            f"⏸️ QUEUED (position {position}/{total}) /queue",
             "",
             f"{emoji} [{req.session}]",
             f"{req.prompt[:100]}...",  # Preview
@@ -142,13 +142,13 @@ class SingleChatPresenter(SessionPresenter):
                 lines.append(f"{emoji} Active: [{session}] {req_type}")
                 lines.append(f"  Waiting: {wait_str}")
                 # Add skip button
-                keyboard.append([{"text": "⏭️ Skip This", "callback_data": "cmd:skip"}])
+                keyboard.append([{"text": f"{emoji} [{session}] Skip", "callback_data": "cmd:skip"}])
             else:
                 lines.append(f"Position {position}: {emoji} [{session}] {req_type}")
                 lines.append(f"  Waiting: {wait_str}")
                 # Add handle now button
                 keyboard.append([{
-                    "text": f"🔼 Handle Now",
+                    "text": f"{emoji} [{session}] Handle Now",
                     "callback_data": f"cmd:priority:{session}"
                 }])
 
@@ -156,6 +156,23 @@ class SingleChatPresenter(SessionPresenter):
 
         text = "\n".join(lines).rstrip()
         markup = {"inline_keyboard": keyboard} if keyboard else None
+
+        return text, markup
+
+    def format_context_message(self, session: str, emoji: str,
+                               context_text: str, has_tty: bool = False) -> tuple[str, dict]:
+        """Format a context message with Reply button.
+
+        Returns (message_text, reply_markup).
+        """
+        tty_indicator = " 🖥" if has_tty else ""
+        text = f"{emoji} [{session}]{tty_indicator}\n{context_text}"
+
+        markup = {
+            "inline_keyboard": [[
+                {"text": "💬 Reply", "callback_data": f"reply:{session}"},
+            ]]
+        }
 
         return text, markup
 

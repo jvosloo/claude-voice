@@ -28,6 +28,8 @@ class AfkManager:
         self._presenter = None  # Set when client is created
 
         self._session_contexts = {}  # session -> last known context string
+        self._session_tty_paths = {}  # session -> TTY device path (e.g. /dev/ttys005)
+        self._reply_target = None  # session that next free text reply goes to
         self._sent_message_ids = []  # track all sent message IDs for /clear
         self._previous_mode = None  # mode before AFK was activated
         self._on_toggle = None  # callback for /afk command
@@ -135,12 +137,22 @@ class AfkManager:
         elif session in self._session_contexts:
             display_context = self._session_contexts[session]
 
+        # Store TTY path if provided
+        tty_path = request.get("tty_path")
+        if tty_path:
+            self._session_tty_paths[session] = tty_path
+
         # Handle context-only updates
         if req_type == "context":
-            # Just update context, don't queue
+            # Update context, set reply target, send with Reply button
             emoji = self._queue.get_session_emoji(session)
-            text = f"{emoji} [{session}]\n{_markdown_to_telegram_html(display_context[:3900])}"
-            self._presenter.send_to_session(session, text)
+            self._reply_target = session
+            has_tty = session in self._session_tty_paths
+            formatted_context = _markdown_to_telegram_html(display_context[:TELEGRAM_MAX_CHARS])
+            text, markup = self._presenter.format_context_message(
+                session, emoji, formatted_context, has_tty=has_tty,
+            )
+            self._presenter.send_to_session(session, text, markup)
             return {"wait": False}
 
         # Extract options from AskUserQuestion
@@ -189,11 +201,26 @@ class AfkManager:
             pending_sessions.add(item['session'])
 
         for session, context in self._session_contexts.items():
+            emoji = self._queue.get_session_emoji(session)
             last_line = context.strip().split("\n")[-1] if context else "No recent activity"
-            # Check if there's a pending request
+
+            # Determine state
             has_pending = session in pending_sessions
-            status = " (waiting for you)" if has_pending else ""
-            lines.append(f"<b>[{session}]</b>{status}\n{_escape_html(last_line)}\n")
+            is_reply_target = self._reply_target == session
+            has_tty = session in self._session_tty_paths
+
+            if has_pending:
+                state = "⏳ waiting for you"
+            elif is_reply_target:
+                state = "💬 reply target"
+            else:
+                state = "idle"
+
+            tty_indicator = " 🖥" if has_tty else ""
+            lines.append(
+                f"{emoji} <b>[{session}]</b>{tty_indicator} — {state}\n"
+                f"{_escape_html(last_line)}\n"
+            )
 
         self._send("\n".join(lines))
 
@@ -212,7 +239,32 @@ class AfkManager:
               f"queue_active={self._queue.get_active() is not None}")
         self._client.answer_callback(callback_id, text=f"Sent: {data}")
 
-        # Route via QueueRouter
+        # Queue management commands work from any message (e.g., /queue summary)
+        if data.startswith("cmd:"):
+            self._client.edit_message_reply_markup(message_id)
+            self._handle_queue_command(data[4:])
+            return
+
+        # Reply button on context messages
+        if data.startswith("reply:"):
+            target_session = data[6:]
+            self._reply_target = target_session
+            has_tty = target_session in self._session_tty_paths
+            if has_tty:
+                self._presenter.send_to_session(
+                    target_session,
+                    f"💬 Type your reply to [{target_session}]:"
+                )
+            else:
+                self._presenter.send_to_session(
+                    target_session,
+                    f"⚠️ No terminal connected for [{target_session}]. "
+                    "Reply not available."
+                )
+                self._reply_target = None
+            return
+
+        # Route via QueueRouter (matches active request by message_id)
         pending = self._router.route_button_press(data, message_id)
 
         if not pending:
@@ -220,11 +272,6 @@ class AfkManager:
 
         # Remove buttons from the message
         self._client.edit_message_reply_markup(message_id)
-
-        # Handle commands (skip, show queue)
-        if data.startswith("cmd:"):
-            self._handle_queue_command(data[4:])
-            return
 
         # "Other" button: don't dequeue, just prompt for free text
         if data == "opt:__other__":
@@ -304,8 +351,35 @@ class AfkManager:
         pending = self._router.route_text_message(text)
 
         if not pending:
-            self._presenter.send_to_session("", "No active request. Queue is empty.")
-            return
+            # No queued request — try reply routing
+            if self._reply_target and self._reply_target in self._session_tty_paths:
+                session = self._reply_target
+                self._reply_target = None  # Clear before injection to prevent loops
+                success = self._inject_reply(session, text)
+                if success:
+                    emoji = self._queue.get_session_emoji(session)
+                    self._presenter.send_to_session(
+                        session,
+                        f"✓ Sent to {emoji} [{session}]: {_escape_html(text)}"
+                    )
+                else:
+                    self._presenter.send_to_session(
+                        session,
+                        f"⚠️ Terminal for [{session}] may be closed. Reply failed."
+                    )
+                    del self._session_tty_paths[session]
+                    self._reply_target = None
+                return
+            elif self._reply_target:
+                self._presenter.send_to_session(
+                    "",
+                    f"⚠️ No terminal connected for [{self._reply_target}]."
+                )
+                self._reply_target = None
+                return
+            else:
+                self._presenter.send_to_session("", "No active request. Queue is empty.")
+                return
 
         # For permission requests, treat text as a question/comment
         if pending.req_type == "permission":
@@ -430,30 +504,58 @@ class AfkManager:
         text, markup = self._presenter.format_queue_summary(summary)
         self._presenter.send_to_session("", text, markup)
 
-    def _type_into_terminal(self, text: str) -> None:
-        """Type text into the terminal prompt via a background subprocess."""
-        self._send(f"Typing into terminal: {_escape_html(text)}")
-        # Use the venv Python to get pynput
-        venv_python = os.path.expanduser("~/.claude-voice/venv/bin/python3")
+    def _inject_reply(self, session: str, text: str) -> bool:
+        """Inject text + Enter into the terminal via osascript keystroke simulation.
+
+        Activates Terminal.app first to ensure keystrokes go to the right
+        window. For AFK mode this is fine — user isn't at the computer so
+        focus stealing is a non-issue. macOS 15+ disabled TIOCSTI, so
+        osascript is the only reliable cross-process input injection method.
+
+        Returns True on success, False on error.
+        """
+        if session not in self._session_tty_paths:
+            return False
+
+        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+        # Activate Terminal.app first to ensure keystrokes land there,
+        # not in whatever app happens to be frontmost (e.g. Telegram Desktop)
         script = (
-            "import time, sys\n"
-            "from pynput.keyboard import Controller, Key\n"
-            "kb = Controller()\n"
-            "text = sys.argv[1]\n"
-            "time.sleep(0.3)\n"
-            "for char in text:\n"
-            "    kb.type(char)\n"
-            "    time.sleep(0.01)\n"
-            "time.sleep(0.1)\n"
-            "kb.press(Key.enter)\n"
-            "kb.release(Key.enter)\n"
+            'tell application "Terminal" to activate\n'
+            'delay 0.3\n'
+            f'tell application "System Events" to keystroke "{escaped}"\n'
+            'delay 0.1\n'
+            'tell application "System Events" to key code 36'  # Return
         )
-        subprocess.Popen(
-            [venv_python, "-c", script, text],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True, timeout=10,
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, OSError) as e:
+            print(f"AFK: osascript inject failed: {e}")
+            return False
+
+    def _type_into_terminal(self, text: str) -> None:
+        """Type text into the terminal via osascript.
+
+        Uses stored session info to verify a terminal exists.
+        Falls back to notification if no terminal is tracked.
+        """
+        # Find session from active request
+        active = self._queue.get_active()
+        session = active.session if active else None
+
+        if session and session in self._session_tty_paths:
+            success = self._inject_reply(session, text)
+            if success:
+                self._send(f"💬 Typed into terminal: {_escape_html(text)}")
+                return
+
+        # No terminal available — notify user
+        self._send(
+            f"⚠️ No terminal connected. Could not type: {_escape_html(text)}"
         )
 
     def _response_path(self, session: str, suffix: str = "") -> str:
@@ -478,6 +580,9 @@ class AfkManager:
         # Note: Queue cleanup would require additional methods
         # For now, requests will remain in queue until timeout or completion
         self._session_contexts.pop(session, None)
+        self._session_tty_paths.pop(session, None)
+        if self._reply_target == session:
+            self._reply_target = None
 
 
 def _escape_html(text: str) -> str:

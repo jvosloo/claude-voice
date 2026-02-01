@@ -163,6 +163,41 @@ class TestAskUserQuestionButtons:
         assert "Skip" in keyboard[-1][0]['text']
 
 
+class TestContextMessageFormatting:
+
+    def test_format_context_message_with_tty(self):
+        """Context message includes terminal indicator when TTY available."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+
+        text, markup = presenter.format_context_message(
+            "my-session", "\U0001f7e2", "Hello world", has_tty=True,
+        )
+
+        assert "[my-session]" in text
+        assert "\U0001f5a5" in text  # computer emoji
+        assert "Hello world" in text
+
+        # Reply button
+        keyboard = markup["inline_keyboard"]
+        assert len(keyboard) == 1
+        assert keyboard[0][0]["text"] == "\U0001f4ac Reply"
+        assert keyboard[0][0]["callback_data"] == "reply:my-session"
+
+    def test_format_context_message_without_tty(self):
+        """Context message has no terminal indicator without TTY."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+
+        text, markup = presenter.format_context_message(
+            "my-session", "\U0001f7e2", "Hello world", has_tty=False,
+        )
+
+        assert "\U0001f5a5" not in text
+        # Reply button still present (button handler checks TTY availability)
+        assert markup["inline_keyboard"][0][0]["callback_data"] == "reply:my-session"
+
+
 class TestSingleChatPresenterQueueSummary:
 
     def test_format_queue_summary_with_multiple_requests(self):
@@ -214,8 +249,8 @@ class TestSingleChatPresenterQueueSummary:
         # Check buttons
         assert markup is not None
         keyboard = markup['inline_keyboard']
-        # First button: Skip active
-        assert "Skip" in keyboard[0][0]['text']
-        # Other buttons: Handle Now for queued items
-        assert "Handle Now" in keyboard[1][0]['text']
+        # First button: Skip active (with session label)
+        assert "[sess-a]" in keyboard[0][0]['text']
+        # Other buttons: Handle Now with session label
+        assert "[sess-b]" in keyboard[1][0]['text']
         assert keyboard[1][0]['callback_data'] == "cmd:priority:sess-b"
