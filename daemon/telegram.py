@@ -12,8 +12,8 @@ POLL_TIMEOUT = 10          # Telegram long-polling hold time
 POLL_SOCKET_TIMEOUT = 15   # must exceed POLL_TIMEOUT
 
 # Polling resilience
-MAX_POLL_ERRORS = 5        # consecutive errors before stopping
-MAX_BACKOFF = 30           # exponential backoff cap
+MAX_BACKOFF = 60           # exponential backoff cap (seconds)
+ERROR_LOG_INTERVAL = 10    # log a warning every N consecutive errors
 
 
 class TelegramClient:
@@ -117,7 +117,11 @@ class TelegramClient:
             self._poll_thread = None
 
     def _poll_loop(self) -> None:
-        """Long-polling loop for incoming updates."""
+        """Long-polling loop for incoming updates.
+
+        Retries indefinitely with exponential backoff on transient errors.
+        Only stops when stop_polling() sets self._polling = False.
+        """
         consecutive_errors = 0
         while self._polling:
             try:
@@ -129,11 +133,9 @@ class TelegramClient:
                 data = resp.json()
                 if not data.get("ok"):
                     consecutive_errors += 1
-                    if consecutive_errors >= MAX_POLL_ERRORS:
-                        print("Telegram: too many polling errors, stopping")
-                        self._polling = False
-                        break
-                    time.sleep(min(2 ** consecutive_errors, MAX_BACKOFF))
+                    if consecutive_errors % ERROR_LOG_INTERVAL == 1:
+                        print(f"Telegram: API error ({consecutive_errors} consecutive)")
+                    time.sleep(min(2 ** min(consecutive_errors, 6), MAX_BACKOFF))
                     continue
 
                 consecutive_errors = 0
@@ -145,11 +147,9 @@ class TelegramClient:
                 continue  # Normal for long-polling
             except Exception as e:
                 consecutive_errors += 1
-                if consecutive_errors >= 5:
-                    print(f"Telegram: polling failed: {e}")
-                    self._polling = False
-                    break
-                time.sleep(min(2 ** consecutive_errors, MAX_BACKOFF))
+                if consecutive_errors % ERROR_LOG_INTERVAL == 1:
+                    print(f"Telegram: polling error ({consecutive_errors} consecutive): {e}")
+                time.sleep(min(2 ** min(consecutive_errors, 6), MAX_BACKOFF))
 
     def _handle_update(self, update: dict) -> None:
         """Route an incoming update to the appropriate handler."""
@@ -176,28 +176,3 @@ class TelegramClient:
             text = message.get("text", "")
             if self._message_handler and text:
                 self._message_handler(text)
-
-
-def make_options_keyboard(options: list[dict]) -> dict:
-    """Create an inline keyboard from AskUserQuestion options.
-
-    Each option is {"label": "...", "description": "..."}.
-    Creates one button per row, plus an "Other" button at the end.
-    Callback data is the option label.
-    """
-    rows = []
-    for opt in options:
-        label = opt.get("label", "?")
-        rows.append([{"text": label, "callback_data": f"opt:{label}"}])
-    return {"inline_keyboard": rows}
-
-
-def make_permission_keyboard() -> dict:
-    """Create an inline keyboard with Yes/Always/No buttons for permission prompts."""
-    return {
-        "inline_keyboard": [
-            [{"text": "\u2713 Yes", "callback_data": "yes"}],
-            [{"text": "\u2713 Always allow", "callback_data": "always"}],
-            [{"text": "\u2717 No", "callback_data": "no"}],
-        ]
-    }

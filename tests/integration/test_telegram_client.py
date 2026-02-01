@@ -1,6 +1,7 @@
 """Integration tests for Telegram client (daemon/telegram.py)."""
 
-from unittest.mock import patch, MagicMock
+import requests
+from unittest.mock import patch, MagicMock, call
 
 from daemon.telegram import TelegramClient
 
@@ -184,3 +185,136 @@ class TestHandleUpdate:
         }
         client._handle_update(update)
         handler.assert_not_called()
+
+
+class TestPollLoopResilience:
+
+    def test_retries_on_api_error(self):
+        """Polling continues after API returns {"ok": false}."""
+        client = _make_client()
+        call_count = 0
+
+        def fake_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            resp = MagicMock()
+            if call_count <= 3:
+                resp.json.return_value = {"ok": False}
+            else:
+                # Stop the loop after proving it survived errors
+                client._polling = False
+                resp.json.return_value = {"ok": True, "result": []}
+            return resp
+
+        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
+             patch("daemon.telegram.time.sleep"):
+            client._polling = True
+            client._poll_loop()
+
+        # Survived 3 API errors and reached the 4th call
+        assert call_count == 4
+
+    def test_retries_on_exception(self):
+        """Polling continues after connection errors."""
+        client = _make_client()
+        call_count = 0
+
+        def fake_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 6:
+                raise ConnectionError("DNS resolution failed")
+            # Stop after proving it survived 6 consecutive exceptions
+            client._polling = False
+            resp = MagicMock()
+            resp.json.return_value = {"ok": True, "result": []}
+            return resp
+
+        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
+             patch("daemon.telegram.time.sleep"):
+            client._polling = True
+            client._poll_loop()
+
+        assert call_count == 7
+
+    def test_stops_only_on_flag(self):
+        """Loop only exits when self._polling is set to False."""
+        client = _make_client()
+        call_count = 0
+
+        def fake_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 3:
+                client._polling = False
+            resp = MagicMock()
+            resp.json.return_value = {"ok": True, "result": []}
+            return resp
+
+        with patch("daemon.telegram.requests.get", side_effect=fake_get):
+            client._polling = True
+            client._poll_loop()
+
+        assert call_count == 3
+        assert client._polling is False
+
+    def test_resets_errors_on_success(self):
+        """Consecutive error counter resets after a successful response."""
+        client = _make_client()
+        call_count = 0
+        sleep_calls = []
+
+        def fake_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            resp = MagicMock()
+            if call_count <= 2:
+                # Two errors
+                resp.json.return_value = {"ok": False}
+            elif call_count == 3:
+                # Success — resets counter
+                resp.json.return_value = {"ok": True, "result": []}
+            elif call_count == 4:
+                # Another error — backoff should restart from small value
+                resp.json.return_value = {"ok": False}
+            else:
+                client._polling = False
+                resp.json.return_value = {"ok": True, "result": []}
+            return resp
+
+        def fake_sleep(seconds):
+            sleep_calls.append(seconds)
+
+        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
+             patch("daemon.telegram.time.sleep", side_effect=fake_sleep):
+            client._polling = True
+            client._poll_loop()
+
+        # After success at call 3, the error at call 4 should have
+        # consecutive_errors=1 so backoff = 2^1 = 2
+        assert call_count == 5
+        assert sleep_calls[-1] == 2  # Reset backoff after success
+
+    def test_timeout_does_not_count_as_error(self):
+        """requests.exceptions.Timeout is normal for long-polling, not an error."""
+        client = _make_client()
+        call_count = 0
+
+        def fake_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 3:
+                raise requests.exceptions.Timeout()
+            client._polling = False
+            resp = MagicMock()
+            resp.json.return_value = {"ok": True, "result": []}
+            return resp
+
+        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
+             patch("daemon.telegram.time.sleep") as mock_sleep:
+            client._polling = True
+            client._poll_loop()
+
+        # Timeouts should NOT trigger sleep (no backoff)
+        mock_sleep.assert_not_called()
+        assert call_count == 4

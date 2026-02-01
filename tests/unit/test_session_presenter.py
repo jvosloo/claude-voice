@@ -62,6 +62,107 @@ class TestSingleChatPresenterFormatting:
         assert "claude-voice" in text  # Active session context
 
 
+class TestAskUserQuestionButtons:
+
+    def test_with_options(self):
+        """Options list produces one button per option plus 'Other'."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        options = [
+            {"label": "Red", "description": "Pick red"},
+            {"label": "Blue", "description": "Pick blue"},
+        ]
+        req = QueuedRequest("sess", "ask_user_question", "Pick a color?", "/tmp/r",
+                            options=options)
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        text, markup = presenter.format_active_request(req, queue_info)
+
+        keyboard = markup['inline_keyboard']
+        assert len(keyboard) == 3  # Red, Blue, Other
+        assert keyboard[0][0]['text'] == "Red"
+        assert keyboard[0][0]['callback_data'] == "opt:Red"
+        assert keyboard[1][0]['text'] == "Blue"
+        assert keyboard[1][0]['callback_data'] == "opt:Blue"
+
+    def test_without_options(self):
+        """Only 'Other' button when options is None."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        req = QueuedRequest("sess", "ask_user_question", "What?", "/tmp/r",
+                            options=None)
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        _, markup = presenter.format_active_request(req, queue_info)
+
+        keyboard = markup['inline_keyboard']
+        assert len(keyboard) == 1
+        assert "Other" in keyboard[0][0]['text']
+
+    def test_empty_options(self):
+        """Only 'Other' button when options is empty list."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        req = QueuedRequest("sess", "ask_user_question", "What?", "/tmp/r",
+                            options=[])
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        _, markup = presenter.format_active_request(req, queue_info)
+
+        keyboard = markup['inline_keyboard']
+        assert len(keyboard) == 1
+        assert keyboard[0][0]['callback_data'] == "opt:__other__"
+
+    def test_callback_data_format(self):
+        """Button callback_data uses opt:<label> format."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        options = [{"label": "Yes & No", "description": "mixed"}]
+        req = QueuedRequest("sess", "ask_user_question", "Q?", "/tmp/r",
+                            options=options)
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        _, markup = presenter.format_active_request(req, queue_info)
+
+        keyboard = markup['inline_keyboard']
+        assert keyboard[0][0]['callback_data'] == "opt:Yes & No"
+
+    def test_other_button_always_last(self):
+        """'Other' button is always the last row."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        options = [
+            {"label": "A", "description": ""},
+            {"label": "B", "description": ""},
+            {"label": "C", "description": ""},
+        ]
+        req = QueuedRequest("sess", "ask_user_question", "Q?", "/tmp/r",
+                            options=options)
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        _, markup = presenter.format_active_request(req, queue_info)
+
+        keyboard = markup['inline_keyboard']
+        assert len(keyboard) == 4  # A, B, C, Other
+        assert keyboard[-1][0]['callback_data'] == "opt:__other__"
+
+    def test_with_queue_adds_management_buttons(self):
+        """Queue management buttons appear after option buttons when queue_size > 0."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        options = [{"label": "X", "description": ""}]
+        req = QueuedRequest("sess", "ask_user_question", "Q?", "/tmp/r",
+                            options=options)
+        queue_info = {'emoji': '🟢', 'queue_size': 1}
+
+        _, markup = presenter.format_active_request(req, queue_info)
+
+        keyboard = markup['inline_keyboard']
+        # X, Other, Skip+ShowAll
+        assert len(keyboard) == 3
+        assert "Skip" in keyboard[-1][0]['text']
+
+
 class TestSingleChatPresenterQueueSummary:
 
     def test_format_queue_summary_with_multiple_requests(self):

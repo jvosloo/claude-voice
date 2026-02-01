@@ -4,6 +4,22 @@ import time
 from daemon.request_queue import RequestQueue, QueuedRequest
 
 
+class TestQueuedRequestOptions:
+
+    def test_options_default_none(self):
+        """QueuedRequest without options defaults to None."""
+        req = QueuedRequest("sess", "permission", "Test", "/tmp/r")
+        assert req.options is None
+
+    def test_options_stored(self):
+        """QueuedRequest stores provided options."""
+        opts = [{"label": "A", "description": "first"}, {"label": "B", "description": "second"}]
+        req = QueuedRequest("sess", "ask_user_question", "Pick?", "/tmp/r", options=opts)
+        assert req.options == opts
+        assert len(req.options) == 2
+        assert req.options[0]["label"] == "A"
+
+
 class TestRequestQueueEnqueue:
 
     def test_enqueue_to_empty_makes_active(self):
