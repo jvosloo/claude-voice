@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ~/.claude-voice/venv/bin/python -m pytest tests/ -v
 
 # Restart daemon (after deploying code changes)
-pkill -f claude-voice-daemon && claude-voice-daemon
+claude-voice-daemon restart
 
 # Reload config only (no restart needed)
 claude-voice-daemon reload
@@ -68,10 +68,16 @@ Communication flows:
 - **HotkeyListener** (`hotkey.py`) — push-to-talk via pynput, language cycling, AFK combo hotkey, speech toggle combo hotkey
 - **AudioRecorder** (`audio.py`) — records via sounddevice, opens/closes stream per recording to control the macOS mic indicator
 - **Transcriber** (`transcribe.py`) — Whisper STT with two backends: MLX (Apple Silicon) and faster-whisper (CPU). Also contains `apply_word_replacements()` for post-transcription corrections
+- **KeyboardSimulator** (`keyboard.py`) — types transcribed text into the focused app via pynput
+- **TranscriptionCleaner** (`cleanup.py`) — optional LLM-based transcription cleanup via Ollama
 - **TTSEngine** (`tts.py`) — Kokoro neural TTS via mlx-audio
 - **Overlay** (`overlay.py`) — floating macOS window (PyObjC/Cocoa/Quartz) with animated waveform, transcription dots, state indicators. Runs on the Cocoa NSRunLoop on the main thread
 - **ControlServer** (`control.py`) — Unix socket server for JSON command/response protocol
 - **AfkManager** (`afk.py`) — Telegram bot integration with pending request tracking
+- **RequestQueue** (`request_queue.py`) — FIFO queue for AFK permission/input requests with session tracking
+- **RequestRouter** (`request_router.py`) — routes Telegram button presses and text messages to the correct queued request
+- **SessionPresenter** (`session_presenter.py`) — formats AFK request messages and inline buttons for Telegram
+- **TelegramClient** (`telegram.py`) — HTTP wrapper for the Telegram Bot API with long-polling
 - **NotifySystem** (`notify.py`) — short audio phrase playback for status events (permission, done)
 
 ### Threading Model
@@ -85,7 +91,7 @@ Communication flows:
 Installed to `~/.claude/hooks/` by the installer. Each hook is a standalone script:
 
 - `speak-response.py` — Stop hook: reads the Claude JSONL transcript, extracts the last assistant message, cleans it (strips code blocks, markdown, tool results), sends to daemon for TTS
-- `notify-permission.py` — Notification hook: tells daemon to play "permission needed" phrase; routes to Telegram in AFK mode
+- `permission-request.py` — Notification hook: tells daemon to play "permission needed" phrase; routes to Telegram in AFK mode
 - `handle-ask-user.py` — handles user input requests during AFK mode
 - `_type_answer.py` — shared logic for typing responses into Claude Code
 - `_common.py` — shared paths and utilities (TTS_SOCK_PATH, SILENT_FLAG, MODE_FILE)
@@ -167,7 +173,7 @@ Quick commands:
 ./deploy.sh
 
 # Restart daemon after deployment
-pkill -f claude-voice-daemon && claude-voice-daemon
+claude-voice-daemon restart
 
 # Reload config only (no restart)
 claude-voice-daemon reload
@@ -181,5 +187,4 @@ claude-voice-daemon reload
 - **PyYAML scientific notation:** `safe_load` parses values like `5e-1` as strings, not floats. The settings app has a `fixScientificNotation()` workaround but values in config.yaml should use decimal form (`0.5`, `0.0`, `1.0`).
 - **Notify phrases are cached .wav files:** When voice/speed/lang_code changes, `regenerate_custom_phrases` must be called to re-render them. The `reload_config` method handles this automatically.
 - **Overlay colors are hardcoded:** Recording green (#34C759) and transcribing purple (#A855F7) are constants in `overlay.py`, not configurable. Only `style` (dark/frosted/colored) is user-facing.
-- **No backward compatibility:** This app is not yet live. Don't add config key stripping or migration code — just remove old keys cleanly.
 - **Check crash reports:** macOS crash logs at `~/Library/Logs/DiagnosticReports/python3.13-*.ips` — useful when ObjC exceptions kill the process without a Python traceback.
