@@ -333,6 +333,19 @@ class AfkManager:
             self._client.answer_callback(callback_id, text=f"Sent: {data}")
             target_session = data[6:]
             self._reply_target = target_session
+
+            # Prefer tmux injection if the session is running in tmux
+            if self._tmux_monitor.is_available():
+                status = self._tmux_monitor.get_session_status(target_session)
+                if status["status"] in ("idle", "working", "waiting"):
+                    self._tmux_reply = True
+                    self._presenter.send_to_session(
+                        target_session,
+                        f"💬 Type your reply to [{target_session}]:"
+                    )
+                    return
+
+            # Fall back to TTY-based osascript injection
             has_tty = target_session in self._session_tty_paths
             if has_tty:
                 self._presenter.send_to_session(
@@ -726,21 +739,33 @@ class AfkManager:
     def _inject_reply(self, session: str, text: str) -> bool:
         """Inject text + Enter into the terminal via osascript keystroke simulation.
 
-        Activates Terminal.app first to ensure keystrokes go to the right
-        window. For AFK mode this is fine — user isn't at the computer so
-        focus stealing is a non-issue. macOS 15+ disabled TIOCSTI, so
-        osascript is the only reliable cross-process input injection method.
+        Finds the specific Terminal.app tab by its TTY path so keystrokes
+        go to the right window. For AFK mode this is fine — user isn't at
+        the computer so focus stealing is a non-issue. macOS 15+ disabled
+        TIOCSTI, so osascript is the only reliable cross-process input
+        injection method.
 
         Returns True on success, False on error.
         """
         if session not in self._session_tty_paths:
             return False
 
+        tty_path = self._session_tty_paths[session]
         escaped = text.replace("\\", "\\\\").replace('"', '\\"')
-        # Activate Terminal.app first to ensure keystrokes land there,
-        # not in whatever app happens to be frontmost (e.g. Telegram Desktop)
+        # Find the Terminal.app tab matching this session's TTY, bring it
+        # to front, then type via System Events keystroke simulation
         script = (
-            'tell application "Terminal" to activate\n'
+            'tell application "Terminal"\n'
+            '  repeat with w in windows\n'
+            '    repeat with t in tabs of w\n'
+            f'      if tty of t is "{tty_path}" then\n'
+            '        set frontmost of w to true\n'
+            '        set selected tab of w to t\n'
+            '        activate\n'
+            '      end if\n'
+            '    end repeat\n'
+            '  end repeat\n'
+            'end tell\n'
             'delay 0.3\n'
             f'tell application "System Events" to keystroke "{escaped}"\n'
             'delay 0.1\n'

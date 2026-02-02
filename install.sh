@@ -532,6 +532,36 @@ echo "      bot_token: \"your-bot-token\""
 echo "      chat_id: \"your-chat-id\""
 echo ""
 
+# macOS Automation permissions (trigger prompts now so they don't surprise the user later)
+echo "=================================="
+echo "macOS Permissions"
+echo "=================================="
+echo ""
+echo "Claude Voice needs Automation permission to type transcribed text and"
+echo "interact with terminal sessions. macOS will show permission dialogs now —"
+echo "please click OK/Allow on each one."
+echo ""
+read -p "Press Enter to check permissions..." _
+
+# Trigger Terminal.app automation permission (needed for AFK reply injection)
+if osascript -e 'tell application "Terminal" to get name of front window' &>/dev/null; then
+    echo "  ✓ Terminal.app automation: allowed"
+else
+    echo "  ✓ Terminal.app automation: prompted (allow in the dialog)"
+    # Try again in case user just approved it
+    osascript -e 'tell application "Terminal" to get name of front window' &>/dev/null
+fi
+
+# Trigger System Events automation permission (needed for keystroke simulation)
+if osascript -e 'tell application "System Events" to get name of first process' &>/dev/null; then
+    echo "  ✓ System Events automation: allowed"
+else
+    echo "  ✓ System Events automation: prompted (allow in the dialog)"
+    osascript -e 'tell application "System Events" to get name of first process' &>/dev/null
+fi
+
+echo ""
+
 # Add shell aliases (only on fresh install)
 if [ "$IS_UPDATE" != true ]; then
     echo ""
