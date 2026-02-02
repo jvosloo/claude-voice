@@ -3,30 +3,40 @@
 ''''exec "$HOME/.claude-voice/venv/bin/python3" "$0" "$@" # '''
 """Claude Code PreToolUse hook for AskUserQuestion.
 
-Intercepts AskUserQuestion tool calls in AFK mode to route them
-through Telegram, allowing remote answering of multi-option prompts.
+In AFK mode, intercepts AskUserQuestion and routes it through Telegram.
+Blocks synchronously until the user responds, then returns a deny decision
+with the answer in the reason — Claude reads it and continues.
 
-Spawns a background subprocess that waits for the Telegram response
-and types the selection into the terminal once the interactive prompt appears.
+In non-AFK mode, returns nothing (tool runs normally with local picker).
 """
 
 import json
 import os
-import subprocess
 import sys
 import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import send_to_daemon, make_debug_logger, read_mode, ASK_USER_FLAG
+from _common import send_to_daemon, make_debug_logger, read_mode, wait_for_response, ASK_USER_FLAG
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/ask-user-debug.log"))
+
+
+def _deny(reason: str) -> None:
+    """Print a deny decision with the given reason. Claude sees this reason."""
+    output = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
+    print(json.dumps(output))
 
 
 def main():
     # Only active in AFK mode
     mode = read_mode()
-
     if mode != "afk":
         return
 
@@ -81,37 +91,43 @@ def main():
     except Exception:
         pass
 
-    # Capture the controlling terminal path before spawning the background
-    # process. The hook runs as a child of Claude Code's terminal, so
-    # /dev/tty resolves to the actual PTY device (e.g., /dev/ttys005).
-    # The background process uses this to inject keystrokes via TIOCSTI.
-    tty_path = None
+    # Block until Telegram response arrives
+    debug(f"Waiting for response at {response_path}")
+    answer = wait_for_response(response_path)
+
+    # Clear flag
     try:
-        tty_fd = os.open("/dev/tty", os.O_RDONLY)
-        tty_path = os.ttyname(tty_fd)
-        os.close(tty_fd)
-        debug(f"Captured TTY path: {tty_path}")
-    except OSError as e:
-        debug(f"Could not capture TTY: {e}")
+        os.remove(ASK_USER_FLAG)
+    except FileNotFoundError:
+        pass
 
-    # Spawn a background subprocess to wait for the Telegram response
-    # and type it into the terminal. This hook returns immediately so
-    # Claude Code can show the interactive prompt.
-    typer_script = os.path.join(os.path.dirname(__file__), "_type_answer.py")
-    first_options = questions[0].get("options", [])
-    options_json = json.dumps(first_options)
+    if not answer:
+        debug("Timed out waiting for response")
+        _deny("AFK mode: the user did not respond in time. You may retry or move on.")
+        return
 
-    cmd = [sys.executable, typer_script, response_path, options_json]
-    if tty_path:
-        cmd.append(tty_path)
+    if answer == "__flush__":
+        debug("Queue flushed, denying")
+        _deny("AFK mode: the request queue was flushed. The question was cancelled.")
+        return
 
-    debug(f"Spawning typer: {typer_script} with response_path={response_path} tty={tty_path}")
-    subprocess.Popen(
-        cmd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        # No start_new_session — child needs same session for TTY access
+    # Skip/Other — let the local picker handle it
+    if answer in ("opt:__other__", "__other__"):
+        debug("User chose Skip/Other, allowing local picker")
+        return
+
+    # Extract the actual answer text
+    if answer.startswith("opt:"):
+        answer_text = answer[4:]
+        debug(f"Option selected: {answer_text}")
+    else:
+        answer_text = answer
+        debug(f"Free-text answer: {answer_text}")
+
+    _deny(
+        f'The user is in AFK mode and already answered this question via Telegram. '
+        f'Their answer was: "{answer_text}". '
+        f'Please continue with this answer and do not retry the question.'
     )
 
 

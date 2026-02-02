@@ -12,6 +12,7 @@ MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
+AFK_STOP_HOOK_TIMEOUT = 10800  # 3 hours — Stop hook blocks while user is AFK
 
 _ERROR_LOG = os.path.expanduser("/tmp/claude-voice/logs/hook_errors.log")
 
@@ -42,39 +43,27 @@ def make_debug_logger(log_path: str):
     return debug
 
 
-def _get_tty_path() -> str | None:
-    """Get controlling terminal path, or None if no TTY."""
-    try:
-        tty_fd = os.open("/dev/tty", os.O_RDONLY)
-        tty_path = os.ttyname(tty_fd)
-        os.close(tty_fd)
-        return tty_path
-    except OSError:
-        return None
-
-
 def send_to_daemon(payload: dict, with_context: bool = False, raw_text: str = "") -> dict | None:
     """Send JSON to daemon and receive a JSON response.
 
     Args:
         payload: JSON payload to send.
-        with_context: If True, add session/tty/context fields for AFK routing.
+        with_context: If True, add session/context fields for AFK routing.
         raw_text: Original unprocessed text (used for context extraction).
     """
     if with_context:
         session = os.path.basename(os.getcwd())
-        tty_path = _get_tty_path()
         source = raw_text or payload.get("text", "")
         context_lines = source.strip().split("\n")[-10:] if source else []
         payload = {
             **payload,
             "session": session,
-            "tty_path": tty_path,
             "context": "\n".join(context_lines),
             "type": "context",
         }
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(10)
         s.connect(TTS_SOCK_PATH)
         s.sendall(json.dumps(payload).encode())
         s.shutdown(socket.SHUT_WR)
@@ -94,9 +83,9 @@ def send_to_daemon(payload: dict, with_context: bool = False, raw_text: str = ""
     return None
 
 
-def wait_for_response(response_path: str) -> str | None:
+def wait_for_response(response_path: str, timeout: float | None = None) -> str | None:
     """Poll for a response file. Returns response text or None on timeout."""
-    deadline = time.time() + AFK_RESPONSE_TIMEOUT
+    deadline = time.time() + (timeout if timeout is not None else AFK_RESPONSE_TIMEOUT)
     while time.time() < deadline:
         if os.path.exists(response_path):
             try:

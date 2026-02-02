@@ -12,10 +12,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ~/.claude-voice/venv/bin/python -m pytest tests/ -v
 
 # Restart daemon (after deploying code changes)
-claude-voice-daemon restart
+~/.claude-voice/claude-voice-daemon restart
 
 # Reload config only (no restart needed)
-claude-voice-daemon reload
+~/.claude-voice/claude-voice-daemon reload
 ```
 
 ## Project Overview
@@ -73,7 +73,7 @@ Communication flows:
 - **TTSEngine** (`tts.py`) — Kokoro neural TTS via mlx-audio
 - **Overlay** (`overlay.py`) — floating macOS window (PyObjC/Cocoa/Quartz) with animated waveform, transcription dots, state indicators. Runs on the Cocoa NSRunLoop on the main thread
 - **ControlServer** (`control.py`) — Unix socket server for JSON command/response protocol
-- **AfkManager** (`afk.py`) — Telegram bot integration with pending request tracking
+- **AfkManager** (`afk.py`) — Telegram bot integration with pending request tracking and Stop hook follow-up routing
 - **RequestQueue** (`request_queue.py`) — FIFO queue for AFK permission/input requests with session tracking
 - **RequestRouter** (`request_router.py`) — routes Telegram button presses and text messages to the correct queued request
 - **SessionPresenter** (`session_presenter.py`) — formats AFK request messages and inline buttons for Telegram
@@ -90,11 +90,10 @@ Communication flows:
 
 Installed to `~/.claude/hooks/` by the installer. Each hook is a standalone script:
 
-- `speak-response.py` — Stop hook: reads the Claude JSONL transcript, extracts the last assistant message, cleans it (strips code blocks, markdown, tool results), sends to daemon for TTS
+- `speak-response.py` — Stop hook: reads the Claude JSONL transcript, extracts the last assistant message, cleans it (strips code blocks, markdown, tool results), sends to daemon for TTS. In AFK mode, blocks waiting for a Telegram follow-up message and returns a "block" decision to continue Claude with the user's instruction
 - `permission-request.py` — PermissionRequest hook: intercepts permission requests before the dialog. In AFK mode, sends tool details (e.g. "Bash: `cat /etc/hosts`") to Telegram and returns programmatic allow/deny. In non-AFK mode, returns "ask" to show the normal dialog
 - `notify-permission.py` — Notification hook: plays "permission needed" audio cue when the permission dialog appears. No-op in AFK mode (PermissionRequest hook handles it)
-- `handle-ask-user.py` — PreToolUse hook (matcher: AskUserQuestion): handles user input requests during AFK mode
-- `_type_answer.py` — shared logic for typing responses into Claude Code
+- `handle-ask-user.py` — PreToolUse hook (matcher: AskUserQuestion): in AFK mode, blocks until Telegram response arrives, then returns deny-with-answer so Claude reads the answer from the reason
 - `_common.py` — shared paths, utilities, and permission rule storage (TTS_SOCK_PATH, SILENT_FLAG, MODE_FILE, permission rules)
 
 ### Configuration
@@ -110,6 +109,7 @@ YAML-based at `~/.claude-voice/config.yaml` (see `config.yaml.example` for all o
 
 Temporary state (in `/tmp/claude-voice/`):
 - `.ask_user_active` — flag for AFK user input in progress
+- `sessions/<session>/response_stop` — response file for Stop hook blocking in AFK mode
 
 ### Debug Logs (in `/tmp/claude-voice/logs/`)
 
@@ -135,6 +135,7 @@ Temporary state (in `/tmp/claude-voice/`):
 - **Word replacements:** `transcription.word_replacements` applies deterministic regex-based corrections after Whisper, before LLM cleanup. Case-insensitive whole-word matching via `\b` boundaries. Applied passively from config on each transcription — no special reload logic needed
 - **Speech toggle hotkey:** `speech.hotkey` (default `left_alt+v`) toggles voice on/off via a second combo hotkey slot in `HotkeyListener`. Plays audio cues, flashes overlay, and broadcasts `voice_changed` events
 - **AFK permission flow:** Two hooks handle permissions: `permission-request.py` (PermissionRequest) fires *before* the dialog and returns programmatic allow/deny/ask; `notify-permission.py` (Notification) fires *after* the dialog appears for audio cues only. In AFK mode, PermissionRequest handles everything so the dialog never appears and Notification never fires
+- **AFK follow-up flow:** The Stop hook (`speak-response.py`) blocks in AFK mode after sending context to Telegram. When the user sends a follow-up message, the daemon writes it to a response file and the hook returns a "block" decision with the message as the reason. This lets Claude continue working with the user's instruction without any terminal injection. The `/back` command writes a `__back__` sentinel to unblock all waiting hooks
 
 ## Settings App Coordination
 
@@ -184,10 +185,10 @@ Quick commands:
 ./deploy.sh
 
 # Restart daemon after deployment
-claude-voice-daemon restart
+~/.claude-voice/claude-voice-daemon restart
 
 # Reload config only (no restart)
-claude-voice-daemon reload
+~/.claude-voice/claude-voice-daemon reload
 ```
 
 ## Gotchas

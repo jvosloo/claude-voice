@@ -34,7 +34,14 @@ class TmuxMonitor:
             return []
 
     def session_has_claude(self, session: str) -> bool:
-        """Check if a tmux session is running a claude process."""
+        """Check if a tmux session is running a claude process.
+
+        Uses two methods: first checks tmux's pane_current_command, then
+        falls back to checking child processes of the pane shell. The
+        fallback is needed because tmux resolves symlinks — Claude Code
+        installs as a symlink to a versioned path, so pane_current_command
+        reports the version number (e.g. '2.1.29') instead of 'claude'.
+        """
         try:
             result = subprocess.run(
                 ["tmux", "list-panes", "-t", session, "-F", "#{pane_current_command}"],
@@ -43,7 +50,32 @@ class TmuxMonitor:
             if result.returncode != 0:
                 return False
             commands = result.stdout.strip().split("\n")
-            return any("claude" in cmd.lower() for cmd in commands)
+            if any("claude" in cmd.lower() for cmd in commands):
+                return True
+
+            # Fallback: check child processes of the pane shell via ps.
+            # We avoid pgrep because macOS pgrep requires a pattern arg
+            # and excludes ancestor processes by default.
+            result = subprocess.run(
+                ["tmux", "list-panes", "-t", session, "-F", "#{pane_pid}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode != 0:
+                return False
+            pane_pids = {p.strip() for p in result.stdout.strip().split("\n") if p.strip()}
+            if not pane_pids:
+                return False
+            ps_result = subprocess.run(
+                ["ps", "-eo", "ppid,comm"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if ps_result.returncode != 0:
+                return False
+            for line in ps_result.stdout.strip().split("\n"):
+                parts = line.strip().split(None, 1)
+                if len(parts) == 2 and parts[0] in pane_pids and "claude" in parts[1].lower():
+                    return True
+            return False
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
@@ -72,8 +104,8 @@ class TmuxMonitor:
         lines = content.strip().split("\n")
         tail = "\n".join(lines[-20:])
 
-        # Working: "ctrl+c to interrupt" visible
-        if "ctrl+c to interrupt" in tail:
+        # Working: various interrupt messages
+        if "ctrl+c to interrupt" in tail or "esc to interrupt" in tail:
             return "working"
 
         # Waiting: permission prompt
@@ -126,31 +158,3 @@ class TmuxMonitor:
                 results.append(status)
 
         return results
-
-    def send_prompt(self, session: str, text: str) -> bool:
-        """Send a prompt to an idle Claude Code session via tmux send-keys.
-
-        Returns True on success, False on error.
-        """
-        # Verify session is idle before sending
-        status = self.get_session_status(session)
-        if status["status"] != "idle":
-            return False
-
-        try:
-            # Send text literally (no special key interpretation)
-            result = subprocess.run(
-                ["tmux", "send-keys", "-t", session, "-l", text],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode != 0:
-                return False
-
-            # Send Enter key
-            result = subprocess.run(
-                ["tmux", "send-keys", "-t", session, "Enter"],
-                capture_output=True, text=True, timeout=5,
-            )
-            return result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False

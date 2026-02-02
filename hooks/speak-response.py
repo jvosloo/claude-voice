@@ -11,7 +11,9 @@ import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import SILENT_FLAG, send_to_daemon, read_mode
+from _common import SILENT_FLAG, send_to_daemon, read_mode, wait_for_response, AFK_STOP_HOOK_TIMEOUT, make_debug_logger
+
+debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/stop_hook.log"))
 
 # Paths
 CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
@@ -124,14 +126,6 @@ def clean_text_for_speech(text: str, config: dict) -> str:
     return text
 
 def main():
-    # Debug: confirm hook fires
-    try:
-        os.makedirs("/tmp/claude-voice", exist_ok=True)
-        with open("/tmp/claude-voice/hook-debug.log", "a") as f:
-            f.write(f"{time.strftime('%H:%M:%S')} hook fired, cwd={os.getcwd()}\n")
-    except OSError:
-        pass
-
     # Read hook input from stdin
     try:
         hook_input = json.load(sys.stdin)
@@ -147,9 +141,9 @@ def main():
 
     # Check if TTS is enabled (config or silent flag)
     if not config.get('enabled', True):
-        return
+        if read_mode() != "afk":
+            return
     if os.path.exists(SILENT_FLAG):
-        # AFK mode overrides silent flag
         if read_mode() != "afk":
             return
 
@@ -160,14 +154,40 @@ def main():
     )
     text = clean_text_for_speech(raw_text, config)
 
-    if text:
-        send_to_daemon({
-            "text": text,
-            "raw_text": raw_text,
-            "voice": config.get("voice", "af_heart"),
-            "speed": config.get("speed", 1.0),
-            "lang_code": config.get("lang_code", "a"),
-        }, with_context=True, raw_text=raw_text)
+    if not text:
+        return
+
+    # Send to daemon (with session context for AFK routing)
+    response = send_to_daemon({
+        "text": text,
+        "raw_text": raw_text,
+        "voice": config.get("voice", "af_heart"),
+        "speed": config.get("speed", 1.0),
+        "lang_code": config.get("lang_code", "a"),
+    }, with_context=True, raw_text=raw_text)
+
+    # In AFK mode, block waiting for a follow-up message from Telegram
+    if not response or not response.get("wait"):
+        return
+
+    response_path = response.get("response_path", "")
+    if not response_path:
+        return
+
+    debug(f"AFK: blocking for follow-up at {response_path}")
+    answer = wait_for_response(response_path, timeout=AFK_STOP_HOOK_TIMEOUT)
+
+    if not answer or answer in ("__back__", "__timeout__", "__flush__"):
+        debug(f"AFK: unblocked with sentinel: {answer!r}")
+        return
+
+    # Return a Stop hook "block" decision -- Claude continues with this message
+    debug(f"AFK: forwarding Telegram message to Claude: {answer[:100]!r}")
+    output = {
+        "decision": "block",
+        "reason": f"The user sent this follow-up message via Telegram while in AFK mode: {answer}"
+    }
+    print(json.dumps(output))
 
 if __name__ == "__main__":
     main()

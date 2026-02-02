@@ -147,52 +147,6 @@ class TestGetAllSessionStatuses:
         assert statuses == []
 
 
-class TestSendPrompt:
-
-    @patch("daemon.tmux_monitor.subprocess.run")
-    def test_send_prompt_to_idle_session(self, mock_run):
-        """Successfully sends text + Enter to an idle session."""
-        call_count = [0]
-
-        def side_effect(cmd, **kwargs):
-            call_count[0] += 1
-            cmd_str = " ".join(cmd)
-            # session_has_claude check (called by get_session_status)
-            if "list-panes" in cmd_str:
-                return MagicMock(returncode=0, stdout="claude\n")
-            # capture_pane (called by get_session_status)
-            if "capture-pane" in cmd_str:
-                return MagicMock(returncode=0, stdout="❯ \n")
-            # display-message for pane_activity
-            if "display-message" in cmd_str:
-                return MagicMock(returncode=0, stdout="1706900000\n")
-            # send-keys calls
-            if "send-keys" in cmd_str:
-                return MagicMock(returncode=0, stdout="")
-            return MagicMock(returncode=1, stdout="")
-
-        mock_run.side_effect = side_effect
-        monitor = TmuxMonitor()
-        assert monitor.send_prompt("my-session", "fix the bug") is True
-
-    @patch("daemon.tmux_monitor.subprocess.run")
-    def test_send_prompt_refused_when_not_idle(self, mock_run):
-        """Refuses to send prompt when session is working."""
-        def side_effect(cmd, **kwargs):
-            cmd_str = " ".join(cmd)
-            if "list-panes" in cmd_str:
-                return MagicMock(returncode=0, stdout="claude\n")
-            if "capture-pane" in cmd_str:
-                return MagicMock(returncode=0, stdout="ctrl+c to interrupt\n")
-            if "display-message" in cmd_str:
-                return MagicMock(returncode=0, stdout="1706900000\n")
-            return MagicMock(returncode=1, stdout="")
-
-        mock_run.side_effect = side_effect
-        monitor = TmuxMonitor()
-        assert monitor.send_prompt("my-session", "fix the bug") is False
-
-
 class TestCapturePaneMethod:
 
     @patch("daemon.tmux_monitor.subprocess.run")

@@ -51,9 +51,10 @@ class TestSessionsCommand:
         assert "working" in msg
 
     @patch("daemon.afk.TmuxMonitor")
-    def test_sessions_no_tmux(self, MockMonitor):
+    def test_sessions_no_tmux_no_known(self, MockMonitor):
         mock_monitor = MockMonitor.return_value
         mock_monitor.is_available.return_value = False
+        mock_monitor.get_all_session_statuses.return_value = []
 
         config = _make_config()
         afk = AfkManager(config)
@@ -65,13 +66,13 @@ class TestSessionsCommand:
 
         call_args = afk._client.send_message.call_args
         msg = call_args[0][0]
-        assert "tmux" in msg.lower()
+        assert "No Claude Code sessions" in msg
 
 
 class TestSessionsButtonCallback:
 
     @patch("daemon.afk.TmuxMonitor")
-    def test_tap_idle_session_sets_tmux_reply_target(self, MockMonitor):
+    def test_tap_idle_session_sets_reply_target(self, MockMonitor):
         mock_monitor = MockMonitor.return_value
         mock_monitor.is_available.return_value = True
         mock_monitor.get_session_status.return_value = {
@@ -90,7 +91,6 @@ class TestSessionsButtonCallback:
         afk._handle_callback("cb1", "tmux:prompt:claude-voice", 456)
 
         assert afk._reply_target == "claude-voice"
-        assert afk._tmux_reply is True
 
     @patch("daemon.afk.TmuxMonitor")
     def test_tap_waiting_session_shows_queue(self, MockMonitor):
@@ -113,12 +113,9 @@ class TestSessionsButtonCallback:
         afk._presenter.send_to_session.assert_called()
 
     @patch("daemon.afk.TmuxMonitor")
-    def test_tap_session_no_longer_idle_warns_user(self, MockMonitor):
+    def test_tap_session_sets_reply_target_regardless(self, MockMonitor):
+        """Prompt button always sets reply target (availability checked at delivery time)."""
         mock_monitor = MockMonitor.return_value
-        mock_monitor.is_available.return_value = True
-        mock_monitor.get_session_status.return_value = {
-            "session": "claude-voice", "status": "working",
-        }
 
         config = _make_config()
         afk = AfkManager(config)
@@ -131,48 +128,38 @@ class TestSessionsButtonCallback:
 
         afk._handle_callback("cb1", "tmux:prompt:claude-voice", 456)
 
+        assert afk._reply_target == "claude-voice"
+        call_args = afk._presenter.send_to_session.call_args
+        msg = call_args[0][1]
+        assert "Send a message" in msg
+
+
+class TestFollowupDelivery:
+
+    @patch("daemon.afk.TmuxMonitor")
+    def test_reply_to_target_delivers_via_stop_hook(self, MockMonitor):
+        """Reply to target delivers followup via Stop hook response file."""
+        config = _make_config()
+        afk = AfkManager(config)
+        afk.active = True
+        afk._reply_target = "claude-voice"
+        afk._router = Mock()
+        afk._router.route_text_message.return_value = None
+        afk._presenter = Mock()
+        afk._presenter.send_to_session = Mock(return_value=123)
+
+        with patch.object(afk, '_deliver_followup') as mock_deliver:
+            afk._handle_message("implement the login feature")
+
+        mock_deliver.assert_called_once_with("claude-voice", "implement the login feature")
         assert afk._reply_target is None
-        assert afk._tmux_reply is False
-        call_args = afk._presenter.send_to_session.call_args
-        msg = call_args[0][1]
-        assert "no longer idle" in msg.lower()
-
-
-class TestTmuxPromptInjection:
 
     @patch("daemon.afk.TmuxMonitor")
-    def test_reply_to_tmux_target_uses_send_keys(self, MockMonitor):
-        mock_monitor = MockMonitor.return_value
-        mock_monitor.is_available.return_value = True
-        mock_monitor.send_prompt.return_value = True
-
+    def test_no_reply_target_shows_no_request_message(self, MockMonitor):
+        """Without reply target, shows 'No active request' message."""
         config = _make_config()
         afk = AfkManager(config)
         afk.active = True
-        afk._reply_target = "claude-voice"
-        afk._tmux_reply = True
-        afk._router = Mock()
-        afk._router.route_text_message.return_value = None
-        afk._presenter = Mock()
-        afk._presenter.send_to_session = Mock(return_value=123)
-
-        afk._handle_message("implement the login feature")
-
-        mock_monitor.send_prompt.assert_called_once_with(
-            "claude-voice", "implement the login feature"
-        )
-
-    @patch("daemon.afk.TmuxMonitor")
-    def test_tmux_send_failure_warns_user(self, MockMonitor):
-        mock_monitor = MockMonitor.return_value
-        mock_monitor.is_available.return_value = True
-        mock_monitor.send_prompt.return_value = False
-
-        config = _make_config()
-        afk = AfkManager(config)
-        afk.active = True
-        afk._reply_target = "claude-voice"
-        afk._tmux_reply = True
         afk._router = Mock()
         afk._router.route_text_message.return_value = None
         afk._presenter = Mock()
@@ -182,4 +169,4 @@ class TestTmuxPromptInjection:
 
         call_args = afk._presenter.send_to_session.call_args
         msg = call_args[0][1]
-        assert "failed" in msg.lower() or "\u26a0" in msg
+        assert "No active request" in msg

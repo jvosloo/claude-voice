@@ -1,8 +1,7 @@
 """AFK mode manager - bridges Claude Code sessions to Telegram."""
 
 import os
-import subprocess
-import time
+import threading
 
 from daemon.telegram import TelegramClient
 from daemon.request_queue import RequestQueue, QueuedRequest
@@ -16,19 +15,6 @@ RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
 # Telegram message limit (4096 max, reserve space for header/buttons/HTML)
 TELEGRAM_MAX_CHARS = 3900
 
-# Setup instructions for /sessions (tmux + shell wrapper)
-_TMUX_SETUP_STEPS = (
-    "<b>Setup:</b>\n"
-    "1. <code>brew install tmux</code>\n"
-    "2. Add to ~/.zshrc:\n"
-    "<code>source ~/.claude-voice/claude-wrapper.sh</code>\n"
-    "3. Run <code>claude</code> in a new terminal"
-)
-_WRAPPER_SETUP_STEP = (
-    "Add to ~/.zshrc:\n"
-    "<code>source ~/.claude-voice/claude-wrapper.sh</code>"
-)
-
 class AfkManager:
     """Manages AFK mode state and Telegram communication."""
 
@@ -41,11 +27,11 @@ class AfkManager:
         self._router = None  # Set when client is created
         self._presenter = None  # Set when client is created
 
+        self._state_lock = threading.Lock()  # protects compound state operations
         self._session_contexts = {}  # session -> last known context string
-        self._session_tty_paths = {}  # session -> TTY device path (e.g. /dev/ttys005)
         self._reply_target = None  # session that next free text reply goes to
+        self._pending_followups = {}  # session -> list[str] queued messages
         self._tmux_monitor = TmuxMonitor()
-        self._tmux_reply = False  # True when reply target is tmux-based (not tty-based)
         self._previous_mode = None  # mode before AFK was activated
         self._on_toggle = None  # callback for /afk command
 
@@ -97,43 +83,10 @@ class AfkManager:
         """Activate AFK mode. Returns True on success."""
         if not self._client:
             return False
-
-        # Create response directory
         os.makedirs(RESPONSE_DIR, exist_ok=True)
-
         self.active = True
-
-        # Send activation message
         self._send("AFK mode active. Send /help for usage.")
-
-        # Warn about /sessions setup (tmux + shell wrapper)
-        tmux_ok = self._tmux_monitor.is_available()
-        wrapper_ok = self._check_shell_wrapper()
-
-        if not tmux_ok:
-            self._send(
-                "\u26a0\ufe0f tmux not found \u2014 /sessions (remote prompts) won't work.\n\n"
-                + _TMUX_SETUP_STEPS
-            )
-        elif not wrapper_ok:
-            self._send(
-                "\u26a0\ufe0f tmux wrapper not found in shell config \u2014 "
-                "sessions won't appear in /sessions.\n"
-                + _WRAPPER_SETUP_STEP
-            )
-
         return True
-
-    def _check_shell_wrapper(self) -> bool:
-        """Check if claude-wrapper.sh is sourced in the user's shell config."""
-        for rc in [os.path.expanduser("~/.bashrc"), os.path.expanduser("~/.zshrc")]:
-            try:
-                with open(rc) as f:
-                    if "claude-wrapper" in f.read():
-                        return True
-            except FileNotFoundError:
-                continue
-        return False
 
     def deactivate(self) -> None:
         """Deactivate AFK mode. Polling continues for /afk command.
@@ -147,10 +100,11 @@ class AfkManager:
 
         self.active = False
         flushed = self._flush_queue()
-        self._session_contexts.clear()
-        self._session_tty_paths.clear()
-        self._reply_target = None
-        self._tmux_reply = False
+        self._unblock_stop_hooks()
+        with self._state_lock:
+            self._session_contexts.clear()
+            self._reply_target = None
+            self._pending_followups.clear()
         if self._client:
             if flushed:
                 self._send(f"AFK mode off. Flushed {flushed} pending request(s). Send /afk to reactivate.")
@@ -184,23 +138,33 @@ class AfkManager:
         elif session in self._session_contexts:
             display_context = self._session_contexts[session]
 
-        # Store TTY path if provided
-        tty_path = request.get("tty_path")
-        if tty_path:
-            self._session_tty_paths[session] = tty_path
-
-        # Handle context-only updates
+        # Handle context-only updates (Stop hook)
         if req_type == "context":
-            # Update context, set reply target, send with Reply button
             emoji = self._queue.get_session_emoji(session)
             self._reply_target = session
-            has_tty = session in self._session_tty_paths
+
+            # Send context to Telegram with Reply button
             formatted_context = _markdown_to_telegram_html(display_context[:TELEGRAM_MAX_CHARS])
             text, markup = self._presenter.format_context_message(
-                session, emoji, formatted_context, has_tty=has_tty,
+                session, emoji, formatted_context,
             )
             self._presenter.send_to_session(session, text, markup)
-            return {"wait": False}
+
+            # Create response path for Stop hook blocking
+            response_path = self._response_path(session, suffix="stop")
+
+            # If followups are already queued, deliver immediately
+            with self._state_lock:
+                if session in self._pending_followups and self._pending_followups[session]:
+                    messages = self._pending_followups.pop(session)
+                else:
+                    messages = None
+            if messages:
+                combined = "\n\n".join(messages)
+                self._write_response(response_path, combined)
+                print(f"AFK: delivered {len(messages)} queued followup(s) to [{session}]")
+
+            return {"wait": True, "response_path": response_path}
 
         # Extract options from AskUserQuestion
         options = None
@@ -254,7 +218,10 @@ class AfkManager:
             # Determine state
             has_pending = session in pending_sessions
             is_reply_target = self._reply_target == session
-            has_tty = session in self._session_tty_paths
+            has_tty = (
+                self._tmux_monitor.is_available()
+                and self._tmux_monitor.get_session_status(session)["status"] != "dead"
+            )
 
             if has_pending:
                 state = "⏳ waiting for you"
@@ -295,21 +262,12 @@ class AfkManager:
             session = parts[2] if len(parts) > 2 else ""
 
             if action == "prompt":
-                # Verify session is still idle
-                status = self._tmux_monitor.get_session_status(session)
-                if status["status"] == "idle":
-                    self._reply_target = session
-                    self._tmux_reply = True
-                    emoji = self._queue.get_session_emoji(session)
-                    self._presenter.send_to_session(
-                        session,
-                        f"\U0001f4ac Send a message to {emoji} [{session}]:"
-                    )
-                else:
-                    self._presenter.send_to_session(
-                        session,
-                        f"\u26a0\ufe0f [{session}] is no longer idle (now: {status['status']})"
-                    )
+                self._reply_target = session
+                emoji = self._queue.get_session_emoji(session)
+                self._presenter.send_to_session(
+                    session,
+                    f"\U0001f4ac Send a message to {emoji} [{session}]:"
+                )
             elif action == "queue":
                 # Show pending requests for this session
                 summary = self._queue.get_queue_summary()
@@ -333,32 +291,10 @@ class AfkManager:
             self._client.answer_callback(callback_id, text=f"Sent: {data}")
             target_session = data[6:]
             self._reply_target = target_session
-
-            # Prefer tmux injection if the session is running in tmux
-            if self._tmux_monitor.is_available():
-                status = self._tmux_monitor.get_session_status(target_session)
-                if status["status"] in ("idle", "working", "waiting"):
-                    self._tmux_reply = True
-                    self._presenter.send_to_session(
-                        target_session,
-                        f"💬 Type your reply to [{target_session}]:"
-                    )
-                    return
-
-            # Fall back to TTY-based osascript injection
-            has_tty = target_session in self._session_tty_paths
-            if has_tty:
-                self._presenter.send_to_session(
-                    target_session,
-                    f"💬 Type your reply to [{target_session}]:"
-                )
-            else:
-                self._presenter.send_to_session(
-                    target_session,
-                    f"⚠️ No terminal connected for [{target_session}]. "
-                    "Reply not available."
-                )
-                self._reply_target = None
+            self._presenter.send_to_session(
+                target_session,
+                f"💬 Type your reply to [{target_session}]:"
+            )
             return
 
         # Route via QueueRouter (matches active request by message_id)
@@ -458,66 +394,32 @@ class AfkManager:
         if not self._router or not self._presenter:
             return
 
+        # Reply target (user tapped Reply) takes priority over queued requests
+        with self._state_lock:
+            target = self._reply_target
+            if target:
+                self._reply_target = None
+        if target:
+            self._deliver_followup(target, text)
+            return
+
         pending = self._router.route_text_message(text)
 
         if not pending:
-            # No queued request — try reply routing
-            if self._reply_target:
-                session = self._reply_target
-                self._reply_target = None
-
-                if self._tmux_reply:
-                    # Tmux-based prompt injection
-                    self._tmux_reply = False
-                    success = self._tmux_monitor.send_prompt(session, text)
-                    if success:
-                        emoji = self._queue.get_session_emoji(session)
-                        self._presenter.send_to_session(
-                            session,
-                            f"\u2713 Sent to {emoji} [{session}]: {_escape_html(text)}"
-                        )
-                    else:
-                        self._presenter.send_to_session(
-                            session,
-                            f"\u26a0\ufe0f Failed to send prompt to [{session}]. Session may no longer be idle."
-                        )
-                    return
-                elif session in self._session_tty_paths:
-                    # Existing osascript-based injection
-                    success = self._inject_reply(session, text)
-                    if success:
-                        emoji = self._queue.get_session_emoji(session)
-                        self._presenter.send_to_session(
-                            session,
-                            f"\u2713 Sent to {emoji} [{session}]: {_escape_html(text)}"
-                        )
-                    else:
-                        self._presenter.send_to_session(
-                            session,
-                            f"\u26a0\ufe0f Terminal for [{session}] may be closed. Reply failed."
-                        )
-                        del self._session_tty_paths[session]
-                    return
-                else:
-                    self._presenter.send_to_session(
-                        "",
-                        f"\u26a0\ufe0f No terminal connected for [{session}]."
-                    )
-                    return
-            else:
-                self._presenter.send_to_session("", "No active request. Queue is empty.")
-                return
+            self._presenter.send_to_session("", "No active request. Send a message after Claude responds.")
+            return
 
         # For permission requests, treat text as a question/comment
         if pending.req_type == "permission":
-            self._type_into_terminal(text)
+            # Deny permission and deliver the question as a followup
+            self._write_response(pending.response_path, "deny_for_question")
             self._presenter.send_to_session(
                 pending.session,
-                f"💬 Sent question to [{pending.session}]: {_escape_html(text)}\n\n"
-                "Permission will be re-requested after Claude responds."
+                f"💬 Question sent to [{pending.session}]: {_escape_html(text)}\n\n"
+                "Permission denied. Claude will see your question."
             )
-            # Deny this permission request (user wants more info)
-            self._write_response(pending.response_path, "deny_for_question")
+            # Queue the question as a followup for when the Stop hook fires
+            self._queue_followup(pending.session, text)
             # Dequeue and present next
             next_req = self._queue.dequeue_active()
             if next_req:
@@ -644,7 +546,7 @@ class AfkManager:
             "/back — deactivate AFK mode\n"
             "/status — show active sessions\n"
             "/queue — show pending requests\n"
-            "/sessions — list tmux sessions and send new prompts\n"
+            "/sessions — list Claude Code sessions and send new prompts\n"
             "/skip — skip current request\n"
             "/flush — clear all pending requests\n"
             "/help — show this message\n"
@@ -653,15 +555,64 @@ class AfkManager:
             "sent as the reply."
         )
 
-    def _handle_sessions_command(self) -> None:
-        """Handle /sessions command -- list tmux Claude Code sessions."""
-        if not self._tmux_monitor.is_available():
-            self._send("tmux is not available.\n\n" + _TMUX_SETUP_STEPS)
-            return
+    def _deliver_followup(self, session: str, text: str) -> None:
+        """Deliver a follow-up message to a session's Stop hook response file."""
+        # Check if session directory exists before creating it — if it doesn't,
+        # no Stop hook has ever registered for this session, so queue instead.
+        session_dir = os.path.join(RESPONSE_DIR, session)
+        if os.path.isdir(session_dir):
+            response_path = self._response_path(session, suffix="stop")
+            self._write_response(response_path, text)
+            emoji = self._queue.get_session_emoji(session)
+            self._presenter.send_to_session(
+                session,
+                f"\u2713 Sent to {emoji} [{session}]: {_escape_html(text)}"
+            )
+        else:
+            # No active Stop hook — queue for later
+            self._queue_followup(session, text)
+            emoji = self._queue.get_session_emoji(session)
+            self._presenter.send_to_session(
+                session,
+                f"\U0001f4e8 Queued for {emoji} [{session}]: {_escape_html(text)}\n"
+                "Will be delivered when Claude finishes its current turn."
+            )
 
-        statuses = self._tmux_monitor.get_all_session_statuses()
-        if not statuses:
-            self._send("No Claude Code sessions found in tmux.")
+    def _queue_followup(self, session: str, text: str) -> None:
+        """Queue a message to be delivered when the next Stop hook fires."""
+        with self._state_lock:
+            if session not in self._pending_followups:
+                self._pending_followups[session] = []
+            self._pending_followups[session].append(text)
+            count = len(self._pending_followups[session])
+        print(f"AFK: queued followup for [{session}], total={count}")
+
+    def _unblock_stop_hooks(self) -> None:
+        """Write __back__ sentinel to all active Stop hook response files."""
+        try:
+            for name in os.listdir(RESPONSE_DIR):
+                session_dir = os.path.join(RESPONSE_DIR, name)
+                stop_file = os.path.join(session_dir, "response_stop")
+                if os.path.isdir(session_dir) and not os.path.exists(stop_file):
+                    # Write sentinel so any blocking Stop hook unblocks
+                    self._write_response(stop_file, "__back__")
+        except FileNotFoundError:
+            pass
+
+    def _handle_sessions_command(self) -> None:
+        """Handle /sessions command -- list Claude Code sessions."""
+        # Discover tmux sessions
+        tmux_statuses = {}
+        if self._tmux_monitor.is_available():
+            for info in self._tmux_monitor.get_all_session_statuses():
+                tmux_statuses[info["session"]] = info
+
+        # Also include sessions we know about from context messages
+        known_sessions = set(self._session_contexts.keys())
+        all_sessions = sorted(known_sessions | set(tmux_statuses.keys()))
+
+        if not all_sessions:
+            self._send("No Claude Code sessions found.")
             return
 
         # Cross-reference with request queue for waiting sessions
@@ -673,60 +624,46 @@ class AfkManager:
             pending_sessions.add(s)
             pending_counts[s] = pending_counts.get(s, 0) + 1
 
-        now = int(time.time())
-
         lines = ["\U0001f4cb <b>Sessions</b>\n"]
         keyboard = []
 
-        for info in statuses:
-            session = info["session"]
-            status = info["status"]
+        for session in all_sessions:
             emoji = self._queue.get_session_emoji(session)
+            tmux_info = tmux_statuses.get(session)
 
-            # Override status if session has pending requests
+            # Determine status
             if session in pending_sessions:
                 count = pending_counts[session]
                 status_text = f"waiting for input ({count} pending)"
                 status_icon = "\U0001f7e1"
-            elif status == "idle":
-                # Calculate idle duration
-                pane_activity = info.get("pane_activity")
-                if pane_activity:
-                    idle_secs = now - pane_activity
-                    if idle_secs < 60:
-                        duration = f"{idle_secs}s"
-                    elif idle_secs < 3600:
-                        duration = f"{idle_secs // 60}m"
-                    else:
-                        duration = f"{idle_secs // 3600}h {(idle_secs % 3600) // 60}m"
-                    status_text = f"idle ({duration})"
-                else:
+                status = "waiting"
+            elif tmux_info:
+                status = tmux_info["status"]
+                if status == "idle":
                     status_text = "idle"
-                status_icon = "\U0001f7e2"
-            elif status == "working":
-                status_text = "working"
-                status_icon = "\U0001f535"
-            elif status == "dead":
-                status_text = "dead"
-                status_icon = "\u26ab"
+                    status_icon = "\U0001f7e2"
+                elif status == "working":
+                    status_text = "working"
+                    status_icon = "\U0001f535"
+                else:
+                    status_text = status
+                    status_icon = "\u26aa"
             else:
-                status_text = status
+                status = "unknown"
+                status_text = "unknown"
                 status_icon = "\u26aa"
 
             lines.append(f"{status_icon} {emoji} <b>[{session}]</b> \u2014 {status_text}")
 
             # Add button for actionable sessions
+            # Truncate session name for callback_data (Telegram 64-byte limit)
+            cb_session = session[:50]
             if status == "idle" and session not in pending_sessions:
-                # Truncate session name for callback_data (Telegram 64-byte limit)
-                # "tmux:prompt:" = 12 chars, leaving ~52 chars for session name
-                cb_session = session[:50]
                 keyboard.append([{
                     "text": f"{emoji} {session} \u2014 send prompt",
                     "callback_data": f"tmux:prompt:{cb_session}",
                 }])
             elif session in pending_sessions:
-                # "tmux:queue:" = 11 chars, leaving ~53 chars for session name
-                cb_session = session[:50]
                 keyboard.append([{
                     "text": f"{emoji} {session} \u2014 show requests",
                     "callback_data": f"tmux:queue:{cb_session}",
@@ -735,72 +672,6 @@ class AfkManager:
         text = "\n".join(lines)
         markup = {"inline_keyboard": keyboard} if keyboard else None
         self._send(text, reply_markup=markup)
-
-    def _inject_reply(self, session: str, text: str) -> bool:
-        """Inject text + Enter into the terminal via osascript keystroke simulation.
-
-        Finds the specific Terminal.app tab by its TTY path so keystrokes
-        go to the right window. For AFK mode this is fine — user isn't at
-        the computer so focus stealing is a non-issue. macOS 15+ disabled
-        TIOCSTI, so osascript is the only reliable cross-process input
-        injection method.
-
-        Returns True on success, False on error.
-        """
-        if session not in self._session_tty_paths:
-            return False
-
-        tty_path = self._session_tty_paths[session]
-        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
-        # Find the Terminal.app tab matching this session's TTY, bring it
-        # to front, then type via System Events keystroke simulation
-        script = (
-            'tell application "Terminal"\n'
-            '  repeat with w in windows\n'
-            '    repeat with t in tabs of w\n'
-            f'      if tty of t is "{tty_path}" then\n'
-            '        set frontmost of w to true\n'
-            '        set selected tab of w to t\n'
-            '        activate\n'
-            '      end if\n'
-            '    end repeat\n'
-            '  end repeat\n'
-            'end tell\n'
-            'delay 0.3\n'
-            f'tell application "System Events" to keystroke "{escaped}"\n'
-            'delay 0.1\n'
-            'tell application "System Events" to key code 36'  # Return
-        )
-        try:
-            result = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True, timeout=10,
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, OSError) as e:
-            print(f"AFK: osascript inject failed: {e}")
-            return False
-
-    def _type_into_terminal(self, text: str) -> None:
-        """Type text into the terminal via osascript.
-
-        Uses stored session info to verify a terminal exists.
-        Falls back to notification if no terminal is tracked.
-        """
-        # Find session from active request
-        active = self._queue.get_active()
-        session = active.session if active else None
-
-        if session and session in self._session_tty_paths:
-            success = self._inject_reply(session, text)
-            if success:
-                self._send(f"💬 Typed into terminal: {_escape_html(text)}")
-                return
-
-        # No terminal available — notify user
-        self._send(
-            f"⚠️ No terminal connected. Could not type: {_escape_html(text)}"
-        )
 
     def _response_path(self, session: str, suffix: str = "") -> str:
         """Get the response file path for a session."""
@@ -823,11 +694,11 @@ class AfkManager:
 
         # Note: Queue cleanup would require additional methods
         # For now, requests will remain in queue until timeout or completion
-        self._session_contexts.pop(session, None)
-        self._session_tty_paths.pop(session, None)
-        if self._reply_target == session:
-            self._reply_target = None
-            self._tmux_reply = False
+        with self._state_lock:
+            self._session_contexts.pop(session, None)
+            self._pending_followups.pop(session, None)
+            if self._reply_target == session:
+                self._reply_target = None
 
 
 def _escape_html(text: str) -> str:

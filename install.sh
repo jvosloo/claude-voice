@@ -298,7 +298,6 @@ cp "$SCRIPT_DIR/hooks/speak-response.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/notify-permission.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/permission-request.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/handle-ask-user.py" "$CLAUDE_HOOKS_DIR/"
-cp "$SCRIPT_DIR/hooks/_type_answer.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/_common.py" "$CLAUDE_HOOKS_DIR/"
 chmod +x "$CLAUDE_HOOKS_DIR/speak-response.py"
 chmod +x "$CLAUDE_HOOKS_DIR/notify-permission.py"
@@ -570,6 +569,9 @@ if [ "$IS_UPDATE" != true ]; then
     if [[ "$SHELL" == *"zsh"* ]]; then
         SHELL_RC="$HOME/.zshrc"
         SHELL_NAME="zsh"
+    elif [ "$(uname)" = "Darwin" ]; then
+        SHELL_RC="$HOME/.bash_profile"
+        SHELL_NAME="bash"
     else
         SHELL_RC="$HOME/.bashrc"
         SHELL_NAME="bash"
@@ -601,30 +603,6 @@ if [ "$IS_UPDATE" != true ]; then
         fi
     fi
 
-    # Add tmux wrapper for claude command (enables AFK remote session control)
-    cp "$SCRIPT_DIR/claude-wrapper.sh" "$INSTALL_DIR/claude-wrapper.sh"
-    if grep -q "claude-wrapper" "$SHELL_RC" 2>/dev/null; then
-        echo "Claude tmux wrapper already configured in $SHELL_RC"
-    else
-        if command -v tmux &>/dev/null; then
-            echo ""
-            echo "The tmux wrapper makes 'claude' automatically run inside tmux,"
-            echo "enabling remote prompt injection via AFK mode."
-            read -p "Add tmux wrapper to $SHELL_RC? [Y/n]: " ADD_WRAPPER
-            ADD_WRAPPER=${ADD_WRAPPER:-Y}
-
-            if [[ "$ADD_WRAPPER" =~ ^[Yy]$ ]]; then
-                echo "" >> "$SHELL_RC"
-                echo "# Claude Voice tmux wrapper (enables remote session control)" >> "$SHELL_RC"
-                echo "source \"$INSTALL_DIR/claude-wrapper.sh\"" >> "$SHELL_RC"
-                echo "Tmux wrapper added to $SHELL_RC"
-            else
-                echo ""
-                echo "To add manually later:"
-                echo "  echo 'source \"$INSTALL_DIR/claude-wrapper.sh\"' >> $SHELL_RC"
-            fi
-        fi
-    fi
 fi
 
 echo ""
@@ -639,6 +617,8 @@ echo "=================================="
 # Remind about shell aliases
 if [[ "$SHELL" == *"zsh"* ]]; then
     SHELL_RC="~/.zshrc"
+elif [ "$(uname)" = "Darwin" ]; then
+    SHELL_RC="~/.bash_profile"
 else
     SHELL_RC="~/.bashrc"
 fi

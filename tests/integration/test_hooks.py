@@ -60,14 +60,13 @@ class TestSendToDaemon:
         # We can't capture the payload this way since connect fails first.
         # Instead, test the payload construction by patching at a lower level.
         with patch("_common.TTS_SOCK_PATH", "/nonexistent/sock"):
-            with patch("_common._get_tty_path", return_value="/dev/ttys001"):
-                # Call with_context — it will fail to connect, but the payload
-                # construction happens before the socket call
-                result = send_to_daemon(
-                    {"text": "hello world", "voice": "af_heart"},
-                    with_context=True,
-                    raw_text="line one\nline two\nline three",
-                )
+            # Call with_context — it will fail to connect, but the payload
+            # construction happens before the socket call
+            result = send_to_daemon(
+                {"text": "hello world", "voice": "af_heart"},
+                with_context=True,
+                raw_text="line one\nline two\nline three",
+            )
         assert result is None  # connection refused, but no crash
 
     def test_with_context_payload_construction(self):
@@ -79,6 +78,7 @@ class TestSendToDaemon:
         class FakeSocket:
             def __init__(self, *a, **kw): pass
             def connect(self, path): pass
+            def settimeout(self, timeout): pass
             def sendall(self, data):
                 captured["payload"] = json.loads(data.decode())
             def shutdown(self, how): pass
@@ -86,18 +86,16 @@ class TestSendToDaemon:
             def close(self): pass
 
         with patch("_common.socket.socket", FakeSocket):
-            with patch("_common._get_tty_path", return_value="/dev/ttys005"):
-                send_to_daemon(
-                    {"text": "test message", "voice": "af_heart"},
-                    with_context=True,
-                    raw_text="context line 1\ncontext line 2",
-                )
+            send_to_daemon(
+                {"text": "test message", "voice": "af_heart"},
+                with_context=True,
+                raw_text="context line 1\ncontext line 2",
+            )
 
         payload = captured["payload"]
         assert payload["text"] == "test message"
         assert payload["voice"] == "af_heart"
         assert payload["type"] == "context"
-        assert payload["tty_path"] == "/dev/ttys005"
         assert "session" in payload
         assert "context line 1" in payload["context"]
         assert "context line 2" in payload["context"]
@@ -111,6 +109,7 @@ class TestSendToDaemon:
         class FakeSocket:
             def __init__(self, *a, **kw): pass
             def connect(self, path): pass
+            def settimeout(self, timeout): pass
             def sendall(self, data):
                 captured["payload"] = json.loads(data.decode())
             def shutdown(self, how): pass
@@ -123,7 +122,6 @@ class TestSendToDaemon:
         payload = captured["payload"]
         assert payload == {"notify_category": "permission"}
         assert "session" not in payload
-        assert "tty_path" not in payload
 
     def test_context_uses_raw_text_for_context_lines(self):
         """When raw_text is provided, context lines come from it, not text."""
@@ -132,6 +130,7 @@ class TestSendToDaemon:
         class FakeSocket:
             def __init__(self, *a, **kw): pass
             def connect(self, path): pass
+            def settimeout(self, timeout): pass
             def sendall(self, data):
                 captured["payload"] = json.loads(data.decode())
             def shutdown(self, how): pass
@@ -139,12 +138,11 @@ class TestSendToDaemon:
             def close(self): pass
 
         with patch("_common.socket.socket", FakeSocket):
-            with patch("_common._get_tty_path", return_value=None):
-                send_to_daemon(
-                    {"text": "cleaned text"},
-                    with_context=True,
-                    raw_text="raw line A\nraw line B",
-                )
+            send_to_daemon(
+                {"text": "cleaned text"},
+                with_context=True,
+                raw_text="raw line A\nraw line B",
+            )
 
         context = captured["payload"]["context"]
         assert "raw line A" in context
@@ -156,6 +154,7 @@ class TestSendToDaemon:
         class FakeSocket:
             def __init__(self, *a, **kw): pass
             def connect(self, path): pass
+            def settimeout(self, timeout): pass
             def sendall(self, data):
                 raise TypeError("simulated bug")
             def shutdown(self, how): pass

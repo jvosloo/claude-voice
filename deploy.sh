@@ -62,15 +62,6 @@ if [ $daemon_changed -eq 0 ]; then
     echo "  No daemon changes"
 fi
 
-# Deploy shell wrapper
-echo ""
-echo "Deploying shell wrapper..."
-if copy_if_changed "$REPO_DIR/claude-wrapper.sh" "$INSTALL_DIR/claude-wrapper.sh"; then
-    :
-else
-    echo "  No wrapper changes"
-fi
-
 # Deploy hooks files
 echo ""
 echo "Deploying hooks files..."
@@ -102,16 +93,16 @@ if $daemon_running; then
     if [ $daemon_changed -gt 0 ]; then
         echo ""
         echo "Daemon files changed - restart required:"
-        echo "  pkill -f daemon/main.py && claude-voice-daemon"
+        echo "  ~/.claude-voice/claude-voice-daemon restart"
         echo ""
         echo "Or reload config only (if only config logic changed):"
-        echo "  claude-voice-daemon reload"
+        echo "  ~/.claude-voice/claude-voice-daemon reload"
     else
         echo "No daemon restart needed (only hooks changed or no changes)"
     fi
 else
     echo -e "${RED}Daemon is not running${NC}"
-    echo "Start it with: claude-voice-daemon"
+    echo "Start it with: ~/.claude-voice/claude-voice-daemon"
 fi
 
 echo ""

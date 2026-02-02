@@ -4,6 +4,14 @@ from abc import ABC, abstractmethod
 from daemon.request_queue import QueuedRequest
 
 
+def _safe_callback_data(data: str) -> str:
+    """Truncate callback_data to Telegram's 64-byte UTF-8 limit."""
+    encoded = data.encode('utf-8')
+    if len(encoded) <= 64:
+        return data
+    return encoded[:64].decode('utf-8', errors='ignore')
+
+
 class SessionPresenter(ABC):
     """Formats and sends messages to Telegram. Swappable for Topics."""
 
@@ -76,7 +84,7 @@ class SingleChatPresenter(SessionPresenter):
                 for opt in options:
                     label = opt.get("label", "?")
                     keyboard.append([
-                        {"text": label, "callback_data": f"opt:{label}"},
+                        {"text": label, "callback_data": _safe_callback_data(f"opt:{label}")},
                     ])
             # Always add "Other" for free-text input
             keyboard.append([
@@ -149,7 +157,7 @@ class SingleChatPresenter(SessionPresenter):
                 # Add handle now button
                 keyboard.append([{
                     "text": f"{emoji} [{session}] Handle Now",
-                    "callback_data": f"cmd:priority:{session}"
+                    "callback_data": _safe_callback_data(f"cmd:priority:{session}")
                 }])
 
             lines.append("")  # Blank line between items
@@ -170,7 +178,7 @@ class SingleChatPresenter(SessionPresenter):
 
         markup = {
             "inline_keyboard": [[
-                {"text": "💬 Reply", "callback_data": f"reply:{session}"},
+                {"text": "💬 Reply", "callback_data": _safe_callback_data(f"reply:{session}")},
             ]]
         }
 

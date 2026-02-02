@@ -71,7 +71,6 @@ fi
 rm -f "$CLAUDE_HOOKS_DIR/notify-permission.py"
 rm -f "$CLAUDE_HOOKS_DIR/permission-request.py"
 rm -f "$CLAUDE_HOOKS_DIR/handle-ask-user.py"
-rm -f "$CLAUDE_HOOKS_DIR/_type_answer.py"
 rm -f "$CLAUDE_HOOKS_DIR/_common.py"
 
 # Remove hooks from settings.json
@@ -180,6 +179,8 @@ echo ""
 # Handle shell aliases
 if [[ "$SHELL" == *"zsh"* ]]; then
     SHELL_RC="$HOME/.zshrc"
+elif [ "$(uname)" = "Darwin" ]; then
+    SHELL_RC="$HOME/.bash_profile"
 else
     SHELL_RC="$HOME/.bashrc"
 fi
@@ -196,20 +197,6 @@ if grep -q "claude-voice-daemon" "$SHELL_RC" 2>/dev/null; then
         echo "Run 'source $SHELL_RC' or open a new terminal to apply."
     else
         echo "Aliases kept in $SHELL_RC - remove manually if desired."
-    fi
-fi
-
-# Remove tmux wrapper if present
-if grep -q "claude-wrapper" "$SHELL_RC" 2>/dev/null; then
-    read -p "Remove tmux wrapper from $SHELL_RC? [Y/n]: " DEL_WRAPPER
-    DEL_WRAPPER=${DEL_WRAPPER:-Y}
-
-    if [[ "$DEL_WRAPPER" =~ ^[Yy]$ ]]; then
-        sed -i '' '/# Claude Voice tmux wrapper/d' "$SHELL_RC"
-        sed -i '' '/claude-wrapper/d' "$SHELL_RC"
-        echo "Removed tmux wrapper from $SHELL_RC"
-    else
-        echo "Tmux wrapper kept in $SHELL_RC - remove manually if desired."
     fi
 fi
 echo ""
