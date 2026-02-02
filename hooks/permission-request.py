@@ -6,15 +6,9 @@
 Intercepts permission requests to route through Telegram for approval.
 Returns JSON decision (allow/deny) instead of keyboard simulation.
 
-MANUAL TEST PLAN:
-1. Install this hook to ~/.claude/hooks/
-2. Start daemon in AFK mode
-3. In a Claude Code session, trigger a permission request (e.g., Bash tool)
-4. Verify Telegram receives the request with [Yes] [Always] [No] buttons
-5. Tap [Yes] → verify tool executes
-6. Trigger same permission again, tap [Always] → verify rule stored
-7. Trigger same permission third time → verify auto-approved (no Telegram message)
-8. Send text question instead of button → verify deny + question typed to terminal
+In AFK mode: sends rich prompt (tool name + command detail) to Telegram,
+waits for user response, returns programmatic allow/deny.
+In non-AFK mode: returns "ask" so the normal permission dialog appears.
 """
 
 import json
@@ -30,6 +24,38 @@ from _common import (
 )
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/permission_hook.log"))
+
+MAX_DETAIL_LENGTH = 200
+
+
+def extract_tool_detail(hook_input: dict) -> str:
+    """Build a human-readable prompt from the hook input's tool name and input.
+
+    Returns e.g. "Bash: `cat /etc/hosts`" or "Read: /path/to/file".
+    """
+    tool_name = hook_input.get("tool_name", "")
+    tool_input = hook_input.get("tool_input", {})
+
+    if not isinstance(tool_input, dict):
+        detail = str(tool_input)[:MAX_DETAIL_LENGTH]
+        return f"{tool_name}: {detail}" if tool_name else detail
+
+    # Extract the most relevant field based on tool type
+    if tool_name == "Bash":
+        detail = tool_input.get("command", str(tool_input))
+    elif tool_name in ("Read", "Write", "Edit"):
+        detail = tool_input.get("file_path", str(tool_input))
+    elif tool_name in ("Grep", "Glob"):
+        detail = tool_input.get("pattern", str(tool_input))
+    else:
+        detail = str(tool_input)
+
+    if len(detail) > MAX_DETAIL_LENGTH:
+        detail = detail[:MAX_DETAIL_LENGTH] + "…"
+
+    if tool_name:
+        return f"{tool_name}: {detail}"
+    return detail
 
 
 def main():
@@ -50,13 +76,22 @@ def main():
         debug("Failed to parse hook input")
         return
 
-    tool_input = hook_input.get("tool_input", {})
-    message = str(tool_input)  # Permission message from Claude Code
+    # Log full input for debugging/verification
+    log_dir = os.path.expanduser("/tmp/claude-voice/logs")
+    os.makedirs(log_dir, exist_ok=True)
+    try:
+        with open(os.path.join(log_dir, "permission_hook_input.json"), "w") as f:
+            json.dump(hook_input, f, indent=2, default=str)
+    except Exception:
+        pass
 
-    debug(f"Permission request: {message}")
+    # Build rich prompt with tool details
+    prompt = extract_tool_detail(hook_input)
+
+    debug(f"Permission request: {prompt}")
 
     # Check permission rules first
-    rule_decision = check_permission_rules(message)
+    rule_decision = check_permission_rules(prompt)
     if rule_decision:
         debug(f"Auto-approved by rule: {rule_decision}")
         output = {
@@ -75,7 +110,7 @@ def main():
     response = send_to_daemon({
         "session": session,
         "type": "permission",
-        "prompt": message,
+        "prompt": prompt,
     })
     debug(f"Daemon response: {response}")
 
@@ -95,7 +130,7 @@ def main():
 
                 if answer_lower in ("always",):
                     decision = "allow"
-                    store_permission_rule(message)
+                    store_permission_rule(prompt)
                     debug("Stored 'always allow' rule")
 
                 elif answer_lower in ("yes", "y"):

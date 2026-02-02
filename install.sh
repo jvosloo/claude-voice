@@ -296,21 +296,23 @@ fi
 echo "Installing Claude Code hooks..."
 cp "$SCRIPT_DIR/hooks/speak-response.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/notify-permission.py" "$CLAUDE_HOOKS_DIR/"
+cp "$SCRIPT_DIR/hooks/permission-request.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/handle-ask-user.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/_type_answer.py" "$CLAUDE_HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/_common.py" "$CLAUDE_HOOKS_DIR/"
 chmod +x "$CLAUDE_HOOKS_DIR/speak-response.py"
 chmod +x "$CLAUDE_HOOKS_DIR/notify-permission.py"
+chmod +x "$CLAUDE_HOOKS_DIR/permission-request.py"
 chmod +x "$CLAUDE_HOOKS_DIR/handle-ask-user.py"
 
 # Update Claude settings for hook
 echo "Configuring Claude Code settings..."
 if [ -f "$CLAUDE_SETTINGS" ]; then
-    # Check if hooks already exist (check for PreToolUse as marker for latest version)
-    if grep -q '"PreToolUse"' "$CLAUDE_SETTINGS"; then
+    # Check if hooks already exist (check for PermissionRequest as marker for latest version)
+    if grep -q '"PermissionRequest"' "$CLAUDE_SETTINGS"; then
         echo "Hooks already configured in settings.json"
     else
-        # Add the Stop hook to existing settings
+        # Add/update hooks in existing settings
         python3 << 'EOF'
 import json
 import os
@@ -346,10 +348,18 @@ settings['hooks']['PreToolUse'] = [{
     }]
 }]
 
+settings['hooks']['PermissionRequest'] = [{
+    "matcher": "",
+    "hooks": [{
+        "type": "command",
+        "command": "~/.claude/hooks/permission-request.py"
+    }]
+}]
+
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
 
-print("Added Stop, Notification, and PreToolUse hooks to settings.json")
+print("Added Stop, Notification, PreToolUse, and PermissionRequest hooks to settings.json")
 EOF
     fi
 else
@@ -389,11 +399,22 @@ else
           }
         ]
       }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/permission-request.py"
+          }
+        ]
+      }
     ]
   }
 }
 EOF
-    echo "Created settings.json with Stop, Notification, and PreToolUse hooks"
+    echo "Created settings.json with Stop, Notification, PreToolUse, and PermissionRequest hooks"
 fi
 
 # macOS permissions check

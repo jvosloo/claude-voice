@@ -69,12 +69,13 @@ if [ -f "$CLAUDE_HOOKS_DIR/speak-response.py" ]; then
     rm -f "$CLAUDE_HOOKS_DIR/speak-response.py"
 fi
 rm -f "$CLAUDE_HOOKS_DIR/notify-permission.py"
+rm -f "$CLAUDE_HOOKS_DIR/permission-request.py"
 rm -f "$CLAUDE_HOOKS_DIR/handle-ask-user.py"
 rm -f "$CLAUDE_HOOKS_DIR/_type_answer.py"
 rm -f "$CLAUDE_HOOKS_DIR/_common.py"
 
 # Remove hooks from settings.json
-if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"Stop"\|"Notification"\|"PreToolUse"' "$CLAUDE_SETTINGS"; then
+if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"Stop"\|"Notification"\|"PreToolUse"\|"PermissionRequest"' "$CLAUDE_SETTINGS"; then
     echo "Removing Claude Voice hooks from Claude settings..."
     python3 << 'EOF'
 import json
@@ -86,7 +87,7 @@ try:
         settings = json.load(f)
 
     if 'hooks' in settings:
-        for hook_name in ['Stop', 'Notification', 'PreToolUse']:
+        for hook_name in ['Stop', 'Notification', 'PreToolUse', 'PermissionRequest']:
             settings['hooks'].pop(hook_name, None)
         # Clean up empty hooks object
         if not settings['hooks']:

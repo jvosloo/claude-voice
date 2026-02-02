@@ -398,7 +398,9 @@ claude-voice/                    # This repo (development)
 └── models/                      # Downloaded AI models
 
 ~/.claude/hooks/                 # Deployed hooks
-└── speak-response.py            # TTS hook
+├── speak-response.py            # TTS hook
+├── permission-request.py        # AFK permission approval hook
+└── notify-permission.py         # Permission notification sound
 ```
 
 ---
@@ -412,9 +414,10 @@ claude-voice/                    # This repo (development)
 - `~/.claude-voice/logs/` - Installation and daemon logs
 
 ### Voice Output (Hooks + Daemon)
-- `~/.claude/hooks/speak-response.py` - Stop hook: sends response text to daemon
-- `~/.claude/hooks/notify-permission.py` - Notification hook: signals permission prompts
-- `~/.claude/settings.json` - Hook configuration (Stop, Notification)
+- `~/.claude/hooks/speak-response.py` - Stop hook: sends response text to daemon for TTS
+- `~/.claude/hooks/notify-permission.py` - Notification hook: plays "permission needed" audio cue
+- `~/.claude/hooks/permission-request.py` - PermissionRequest hook: routes permissions through Telegram in AFK mode, returns programmatic allow/deny decisions
+- `~/.claude/settings.json` - Hook configuration (Stop, Notification, PermissionRequest, PreToolUse)
 - `~/.claude-voice/.tts.sock` - Unix socket for hook-to-daemon TTS communication (runtime)
 - Kokoro TTS model cached at `~/.cache/huggingface/hub/models--mlx-community--Kokoro-82M-bf16/`
 

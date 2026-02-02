@@ -91,10 +91,11 @@ Communication flows:
 Installed to `~/.claude/hooks/` by the installer. Each hook is a standalone script:
 
 - `speak-response.py` — Stop hook: reads the Claude JSONL transcript, extracts the last assistant message, cleans it (strips code blocks, markdown, tool results), sends to daemon for TTS
-- `permission-request.py` — Notification hook: tells daemon to play "permission needed" phrase; routes to Telegram in AFK mode
-- `handle-ask-user.py` — handles user input requests during AFK mode
+- `permission-request.py` — PermissionRequest hook: intercepts permission requests before the dialog. In AFK mode, sends tool details (e.g. "Bash: `cat /etc/hosts`") to Telegram and returns programmatic allow/deny. In non-AFK mode, returns "ask" to show the normal dialog
+- `notify-permission.py` — Notification hook: plays "permission needed" audio cue when the permission dialog appears. No-op in AFK mode (PermissionRequest hook handles it)
+- `handle-ask-user.py` — PreToolUse hook (matcher: AskUserQuestion): handles user input requests during AFK mode
 - `_type_answer.py` — shared logic for typing responses into Claude Code
-- `_common.py` — shared paths and utilities (TTS_SOCK_PATH, SILENT_FLAG, MODE_FILE)
+- `_common.py` — shared paths, utilities, and permission rule storage (TTS_SOCK_PATH, SILENT_FLAG, MODE_FILE, permission rules)
 
 ### Configuration
 
@@ -104,8 +105,16 @@ YAML-based at `~/.claude-voice/config.yaml` (see `config.yaml.example` for all o
 
 - `.silent` — flag file disabling voice output
 - `.mode` — current TTS mode string (`notify`/`narrate`/`afk`)
-- `.ask_user_active` — flag for AFK user input in progress
 - `daemon.pid` — daemon process ID
+- `permission_rules.json` — stored "always allow" permission rules from AFK mode
+
+Temporary state (in `/tmp/claude-voice/`):
+- `.ask_user_active` — flag for AFK user input in progress
+
+### Debug Logs (in `/tmp/claude-voice/logs/`)
+
+- `permission_hook.log` — permission hook debug trace (both hooks write here)
+- `permission_hook_input.json` — last raw hook input JSON (useful for verifying schema)
 
 ## Testing Conventions
 
@@ -114,6 +123,7 @@ YAML-based at `~/.claude-voice/config.yaml` (see `config.yaml.example` for all o
 - Test classes grouped by component (e.g., `TestAfkConfigPostInit`, `TestHotkeyReload`)
 - Unit tests (`tests/unit/`) have no external dependencies; integration tests (`tests/integration/`) may need mocked sockets/files
 - The project root is added to `sys.path` in conftest.py so `daemon` and `hooks` are directly importable
+- Hook scripts with hyphens in filenames (e.g., `permission-request.py`) must be imported via `importlib.util.spec_from_file_location` in tests — see `test_permission_hook.py` for the pattern
 
 ## Key Patterns
 
@@ -124,6 +134,7 @@ YAML-based at `~/.claude-voice/config.yaml` (see `config.yaml.example` for all o
 - **Voice commands:** transcribed text is checked for command phrases ("stop speaking", "switch to narrate mode", etc.) before being typed
 - **Word replacements:** `transcription.word_replacements` applies deterministic regex-based corrections after Whisper, before LLM cleanup. Case-insensitive whole-word matching via `\b` boundaries. Applied passively from config on each transcription — no special reload logic needed
 - **Speech toggle hotkey:** `speech.hotkey` (default `left_alt+v`) toggles voice on/off via a second combo hotkey slot in `HotkeyListener`. Plays audio cues, flashes overlay, and broadcasts `voice_changed` events
+- **AFK permission flow:** Two hooks handle permissions: `permission-request.py` (PermissionRequest) fires *before* the dialog and returns programmatic allow/deny/ask; `notify-permission.py` (Notification) fires *after* the dialog appears for audio cues only. In AFK mode, PermissionRequest handles everything so the dialog never appears and Notification never fires
 
 ## Settings App Coordination
 
