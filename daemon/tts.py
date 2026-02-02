@@ -73,13 +73,19 @@ class TTSEngine:
 
             sf.write(tmp_path, audio_np, SAMPLE_RATE)
 
-            # Play audio
-            self._playback_proc = subprocess.Popen(['afplay', tmp_path])
-            self._playback_proc.wait()
-            self._playback_proc = None
-
-            # Clean up
-            os.unlink(tmp_path)
+            try:
+                # Play audio
+                proc = subprocess.Popen(['afplay', tmp_path])
+                with self._lock:
+                    self._playback_proc = proc
+                proc.wait()
+                with self._lock:
+                    self._playback_proc = None
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
         except Exception as e:
             print(f"TTS error: {e}")
@@ -87,6 +93,7 @@ class TTSEngine:
     def stop_playback(self) -> bool:
         """Stop current audio playback. Returns True if playback was active."""
         from daemon import kill_playback_proc
-        was_active = kill_playback_proc(self._playback_proc)
-        self._playback_proc = None
-        return was_active
+        with self._lock:
+            proc = self._playback_proc
+            self._playback_proc = None
+        return kill_playback_proc(proc)

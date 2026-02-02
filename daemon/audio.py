@@ -48,7 +48,7 @@ class AudioRecorder:
         if self._stream is not None:
             try:
                 self._stream.close()
-            except:
+            except Exception:
                 pass
             self._stream = None
 
@@ -94,7 +94,7 @@ class AudioRecorder:
             try:
                 self._stream.stop()
                 self._stream.close()
-            except:
+            except Exception:
                 pass
             self._stream = None
 
@@ -107,7 +107,7 @@ class AudioRecorder:
             try:
                 self._stream.stop()
                 self._stream.close()
-            except:
+            except Exception:
                 pass
             self._stream = None
 

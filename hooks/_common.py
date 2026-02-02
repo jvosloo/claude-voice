@@ -3,6 +3,7 @@
 import json
 import os
 import socket
+import sys
 import time
 
 # Shared paths
@@ -12,6 +13,20 @@ SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
 
+_ERROR_LOG = os.path.expanduser("/tmp/claude-voice/logs/hook_errors.log")
+
+
+def log_error(hook: str, error: Exception) -> None:
+    """Log hook errors to debug file and stderr."""
+    msg = f"[{hook}] {type(error).__name__}: {error}"
+    try:
+        os.makedirs(os.path.dirname(_ERROR_LOG), exist_ok=True)
+        with open(_ERROR_LOG, "a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+    except OSError:
+        pass
+    print(msg, file=sys.stderr)
+
 
 def make_debug_logger(log_path: str):
     """Create a debug logging function that writes to the given log file."""
@@ -20,13 +35,44 @@ def make_debug_logger(log_path: str):
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
             with open(log_path, "a") as f:
                 f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
-        except Exception:
-            pass
+        except OSError:
+            pass  # Expected: dir unwritable, disk full
+        except Exception as e:
+            print(f"[claude-voice] log write failed: {e}", file=sys.stderr)
     return debug
 
 
-def send_to_daemon(payload: dict) -> dict | None:
-    """Send JSON to daemon and receive a JSON response."""
+def _get_tty_path() -> str | None:
+    """Get controlling terminal path, or None if no TTY."""
+    try:
+        tty_fd = os.open("/dev/tty", os.O_RDONLY)
+        tty_path = os.ttyname(tty_fd)
+        os.close(tty_fd)
+        return tty_path
+    except OSError:
+        return None
+
+
+def send_to_daemon(payload: dict, with_context: bool = False, raw_text: str = "") -> dict | None:
+    """Send JSON to daemon and receive a JSON response.
+
+    Args:
+        payload: JSON payload to send.
+        with_context: If True, add session/tty/context fields for AFK routing.
+        raw_text: Original unprocessed text (used for context extraction).
+    """
+    if with_context:
+        session = os.path.basename(os.getcwd())
+        tty_path = _get_tty_path()
+        source = raw_text or payload.get("text", "")
+        context_lines = source.strip().split("\n")[-10:] if source else []
+        payload = {
+            **payload,
+            "session": session,
+            "tty_path": tty_path,
+            "context": "\n".join(context_lines),
+            "type": "context",
+        }
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(TTS_SOCK_PATH)
@@ -42,9 +88,9 @@ def send_to_daemon(payload: dict) -> dict | None:
         if data:
             return json.loads(data.decode())
     except (ConnectionRefusedError, FileNotFoundError):
-        pass
-    except Exception:
-        pass
+        pass  # Daemon not running — expected
+    except Exception as e:
+        log_error("send_to_daemon", e)
     return None
 
 
@@ -56,10 +102,13 @@ def wait_for_response(response_path: str) -> str | None:
             try:
                 with open(response_path) as f:
                     response = f.read().strip()
+            except OSError:
+                continue  # File not ready yet
+            try:
                 os.remove(response_path)
-                return response
-            except Exception:
-                pass
+            except OSError:
+                pass  # Will be cleaned up later
+            return response
         time.sleep(1)
     return None
 
@@ -70,7 +119,7 @@ def read_mode() -> str:
         try:
             with open(MODE_FILE) as f:
                 return f.read().strip()
-        except Exception:
+        except (OSError, ValueError):
             pass
     return ""
 
@@ -85,7 +134,10 @@ def load_permission_rules() -> list[dict]:
     try:
         with open(PERMISSION_RULES_FILE) as f:
             return json.load(f)
-    except Exception:
+    except json.JSONDecodeError as e:
+        print(f"Warning: corrupt permission rules file: {e}", file=sys.stderr)
+        return []
+    except OSError:
         return []
 
 
@@ -106,9 +158,12 @@ def store_permission_rule(pattern: str) -> None:
     })
 
     # Save
-    os.makedirs(os.path.dirname(PERMISSION_RULES_FILE), exist_ok=True)
-    with open(PERMISSION_RULES_FILE, "w") as f:
-        json.dump(rules, f, indent=2)
+    try:
+        os.makedirs(os.path.dirname(PERMISSION_RULES_FILE), exist_ok=True)
+        with open(PERMISSION_RULES_FILE, "w") as f:
+            json.dump(rules, f, indent=2)
+    except OSError as e:
+        print(f"Warning: could not save permission rule: {e}", file=sys.stderr)
 
 
 def check_permission_rules(message: str) -> str | None:

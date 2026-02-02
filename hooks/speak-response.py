@@ -6,13 +6,12 @@
 import json
 import os
 import re
-import socket
 import sys
 import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import TTS_SOCK_PATH, SILENT_FLAG, MODE_FILE
+from _common import SILENT_FLAG, send_to_daemon, read_mode
 
 # Paths
 CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
@@ -24,7 +23,10 @@ def load_config():
         with open(CONFIG_PATH) as f:
             config = yaml.safe_load(f) or {}
         return config.get('speech', {})
-    except Exception:
+    except ImportError:
+        return {}
+    except Exception as e:
+        print(f"[speak-response] config load error: {e}", file=sys.stderr)
         return {}
 
 def _wait_for_transcript_flush(transcript_path: str, timeout: float = 2.0) -> None:
@@ -121,82 +123,14 @@ def clean_text_for_speech(text: str, config: dict) -> str:
 
     return text
 
-def speak(text: str, config: dict) -> None:
-    """Send text to the daemon's TTS server."""
-    if not text:
-        return
-
-    try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(TTS_SOCK_PATH)
-        s.sendall(json.dumps({
-            "text": text,
-            "voice": config.get("voice", "af_heart"),
-            "speed": config.get("speed", 1.0),
-            "lang_code": config.get("lang_code", "a"),
-        }).encode())
-        s.close()
-    except (ConnectionRefusedError, FileNotFoundError):
-        pass  # Daemon not running, silent fail
-
-def send_with_context(text: str, config: dict, raw_text: str = "") -> dict | None:
-    """Send text to daemon with session context. Returns daemon response."""
-    if not text:
-        return None
-
-    session = os.path.basename(os.getcwd())
-
-    # Check if this hook has a controlling terminal. The daemon uses this
-    # to know replies can be injected via osascript for this session.
-    tty_path = None
-    try:
-        tty_fd = os.open("/dev/tty", os.O_RDONLY)
-        tty_path = os.ttyname(tty_fd)
-        os.close(tty_fd)
-    except OSError:
-        pass
-
-    # Get last N lines as context (from raw text for Telegram)
-    source = raw_text or text
-    context_lines = source.strip().split("\n")[-10:]
-    context = "\n".join(context_lines)
-
-    try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.connect(TTS_SOCK_PATH)
-        s.sendall(json.dumps({
-            "text": text,
-            "raw_text": raw_text,
-            "voice": config.get("voice", "af_heart"),
-            "speed": config.get("speed", 1.0),
-            "lang_code": config.get("lang_code", "a"),
-            "session": session,
-            "context": context,
-            "type": "context",
-            "tty_path": tty_path,
-            "terminal_app": terminal_app,
-        }).encode())
-        s.shutdown(socket.SHUT_WR)
-        # Read response
-        data = b""
-        while True:
-            chunk = s.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-        s.close()
-        if data:
-            return json.loads(data.decode())
-    except (ConnectionRefusedError, FileNotFoundError):
-        pass
-    except Exception:
-        pass
-    return None
-
 def main():
     # Debug: confirm hook fires
-    with open("/tmp/claude-voice/hook-debug.log", "a") as f:
-        f.write(f"{time.strftime('%H:%M:%S')} hook fired, cwd={os.getcwd()}\n")
+    try:
+        os.makedirs("/tmp/claude-voice", exist_ok=True)
+        with open("/tmp/claude-voice/hook-debug.log", "a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} hook fired, cwd={os.getcwd()}\n")
+    except OSError:
+        pass
 
     # Read hook input from stdin
     try:
@@ -215,15 +149,8 @@ def main():
     if not config.get('enabled', True):
         return
     if os.path.exists(SILENT_FLAG):
-        # Check if in AFK mode (AFK overrides silent)
-        mode = ""
-        if os.path.exists(MODE_FILE):
-            try:
-                with open(MODE_FILE) as f:
-                    mode = f.read().strip()
-            except Exception:
-                pass
-        if mode != "afk":
+        # AFK mode overrides silent flag
+        if read_mode() != "afk":
             return
 
     # Extract and clean the last response
@@ -234,7 +161,13 @@ def main():
     text = clean_text_for_speech(raw_text, config)
 
     if text:
-        send_with_context(text, config, raw_text=raw_text)
+        send_to_daemon({
+            "text": text,
+            "raw_text": raw_text,
+            "voice": config.get("voice", "af_heart"),
+            "speed": config.get("speed", 1.0),
+            "lang_code": config.get("lang_code", "a"),
+        }, with_context=True, raw_text=raw_text)
 
 if __name__ == "__main__":
     main()

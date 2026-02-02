@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import threading
 
 # Categories
 PERMISSION = "permission"
@@ -20,6 +21,7 @@ _CACHE_DIR = os.path.expanduser("~/.claude-voice/notify_cache")
 _CACHE_META = os.path.join(_CACHE_DIR, "meta.yaml")
 
 _playback_proc = None
+_playback_lock = threading.Lock()
 
 
 def _get_phrase_path(category: str, config_phrases: dict | None) -> str:
@@ -43,9 +45,12 @@ def play_phrase(category: str, config_phrases: dict | None = None) -> None:
         return
 
     try:
-        _playback_proc = subprocess.Popen(["afplay", path])
-        _playback_proc.wait()
-        _playback_proc = None
+        proc = subprocess.Popen(["afplay", path])
+        with _playback_lock:
+            _playback_proc = proc
+        proc.wait()
+        with _playback_lock:
+            _playback_proc = None
     except Exception as e:
         print(f"Notify playback error: {e}")
 
@@ -54,9 +59,10 @@ def stop_playback() -> bool:
     """Stop current notification playback. Returns True if was playing."""
     global _playback_proc
     from daemon import kill_playback_proc
-    was_active = kill_playback_proc(_playback_proc)
-    _playback_proc = None
-    return was_active
+    with _playback_lock:
+        proc = _playback_proc
+        _playback_proc = None
+    return kill_playback_proc(proc)
 
 
 def regenerate_custom_phrases(

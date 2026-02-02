@@ -428,6 +428,7 @@ class VoiceDaemon:
             except OSError:
                 break
 
+            conn_closed = False
             try:
                 data = b""
                 while True:
@@ -450,12 +451,14 @@ class VoiceDaemon:
                     # Send response back to hook
                     conn.sendall(json.dumps(response).encode())
                     conn.close()
+                    conn_closed = True
                     continue
 
                 # Not AFK - send non-waiting response and handle normally
                 if session:
                     conn.sendall(json.dumps({"wait": False}).encode())
                 conn.close()
+                conn_closed = True
 
                 # Direct category from hooks (e.g. PreToolUse permission)
                 notify_category = request.get("notify_category")
@@ -479,6 +482,12 @@ class VoiceDaemon:
                         self.tts_engine.speak(text, voice=voice, speed=speed, lang_code=lang_code)
             except Exception as e:
                 print(f"TTS server error: {e}")
+            finally:
+                if not conn_closed:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
 
         server.close()
         if os.path.exists(TTS_SOCK_PATH):
