@@ -87,7 +87,7 @@ class AfkManager:
         self.active = True
 
         # Send activation message
-        self._send("AFK mode active. Send /back to deactivate.")
+        self._send("AFK mode active. Send /help for usage.")
 
         return True
 
