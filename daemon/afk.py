@@ -16,6 +16,19 @@ RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
 # Telegram message limit (4096 max, reserve space for header/buttons/HTML)
 TELEGRAM_MAX_CHARS = 3900
 
+# Setup instructions for /sessions (tmux + shell wrapper)
+_TMUX_SETUP_STEPS = (
+    "<b>Setup:</b>\n"
+    "1. <code>brew install tmux</code>\n"
+    "2. Add to ~/.zshrc:\n"
+    "<code>source ~/.claude-voice/claude-wrapper.sh</code>\n"
+    "3. Run <code>claude</code> in a new terminal"
+)
+_WRAPPER_SETUP_STEP = (
+    "Add to ~/.zshrc:\n"
+    "<code>source ~/.claude-voice/claude-wrapper.sh</code>"
+)
+
 class AfkManager:
     """Manages AFK mode state and Telegram communication."""
 
@@ -45,14 +58,14 @@ class AfkManager:
         """Check if Telegram credentials are configured."""
         return bool(self.config.afk.telegram.bot_token and self.config.afk.telegram.chat_id)
 
-    def start_listening(self, on_toggle=None) -> bool:
+    def start_listening(self, on_toggle=None) -> tuple[bool, str]:
         """Start Telegram polling (always-on). Called once at daemon startup.
 
         When not in AFK mode, only /afk and other commands are processed.
-        Returns True on success.
+        Returns (ok, error_reason).
         """
         if not self.is_configured:
-            return False
+            return False, ""
 
         self._on_toggle = on_toggle
         self._client = TelegramClient(
@@ -60,9 +73,10 @@ class AfkManager:
             self.config.afk.telegram.chat_id,
         )
 
-        if not self._client.verify():
+        ok, reason = self._client.verify()
+        if not ok:
             self._client = None
-            return False
+            return False, reason
 
         self._router = QueueRouter(self._queue)
         self._presenter = SingleChatPresenter(self._client)
@@ -71,7 +85,7 @@ class AfkManager:
             on_callback=self._handle_callback,
             on_message=self._handle_message,
         )
-        return True
+        return True, ""
 
     def stop_listening(self) -> None:
         """Stop Telegram polling. Called at daemon shutdown."""
@@ -92,7 +106,34 @@ class AfkManager:
         # Send activation message
         self._send("AFK mode active. Send /help for usage.")
 
+        # Warn about /sessions setup (tmux + shell wrapper)
+        tmux_ok = self._tmux_monitor.is_available()
+        wrapper_ok = self._check_shell_wrapper()
+
+        if not tmux_ok:
+            self._send(
+                "\u26a0\ufe0f tmux not found \u2014 /sessions (remote prompts) won't work.\n\n"
+                + _TMUX_SETUP_STEPS
+            )
+        elif not wrapper_ok:
+            self._send(
+                "\u26a0\ufe0f tmux wrapper not found in shell config \u2014 "
+                "sessions won't appear in /sessions.\n"
+                + _WRAPPER_SETUP_STEP
+            )
+
         return True
+
+    def _check_shell_wrapper(self) -> bool:
+        """Check if claude-wrapper.sh is sourced in the user's shell config."""
+        for rc in [os.path.expanduser("~/.bashrc"), os.path.expanduser("~/.zshrc")]:
+            try:
+                with open(rc) as f:
+                    if "claude-wrapper" in f.read():
+                        return True
+            except FileNotFoundError:
+                continue
+        return False
 
     def deactivate(self) -> None:
         """Deactivate AFK mode. Polling continues for /afk command.
@@ -602,7 +643,7 @@ class AfkManager:
     def _handle_sessions_command(self) -> None:
         """Handle /sessions command -- list tmux Claude Code sessions."""
         if not self._tmux_monitor.is_available():
-            self._send("tmux is not available. Install with: brew install tmux")
+            self._send("tmux is not available.\n\n" + _TMUX_SETUP_STEPS)
             return
 
         statuses = self._tmux_monitor.get_all_session_statuses()

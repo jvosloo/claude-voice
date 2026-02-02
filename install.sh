@@ -515,6 +515,23 @@ echo "Error detection uses Claude Code hooks (no LLM required)."
 echo "Switch at runtime with voice command: 'switch to notify mode'"
 echo ""
 
+# AFK mode info
+echo "=================================="
+echo "AFK Mode"
+echo "=================================="
+echo ""
+echo "AFK mode lets you handle Claude Code permissions and questions remotely"
+echo "via Telegram, and send new prompts to idle sessions while away from your desk."
+echo ""
+echo "To set up AFK mode, add your Telegram bot token and chat ID to:"
+echo "  ~/.claude-voice/config.yaml"
+echo ""
+echo "  afk:"
+echo "    telegram:"
+echo "      bot_token: \"your-bot-token\""
+echo "      chat_id: \"your-chat-id\""
+echo ""
+
 # Add shell aliases (only on fresh install)
 if [ "$IS_UPDATE" != true ]; then
     echo ""
@@ -551,6 +568,31 @@ if [ "$IS_UPDATE" != true ]; then
             echo '  alias cv="~/.claude-voice/claude-voice-daemon"'
             echo '  alias cvf="~/.claude-voice/claude-voice-daemon foreground"'
             echo '  alias cvs="~/.claude-voice/claude-voice-daemon --silent foreground"'
+        fi
+    fi
+
+    # Add tmux wrapper for claude command (enables AFK remote session control)
+    cp "$SCRIPT_DIR/claude-wrapper.sh" "$INSTALL_DIR/claude-wrapper.sh"
+    if grep -q "claude-wrapper" "$SHELL_RC" 2>/dev/null; then
+        echo "Claude tmux wrapper already configured in $SHELL_RC"
+    else
+        if command -v tmux &>/dev/null; then
+            echo ""
+            echo "The tmux wrapper makes 'claude' automatically run inside tmux,"
+            echo "enabling remote prompt injection via AFK mode."
+            read -p "Add tmux wrapper to $SHELL_RC? [Y/n]: " ADD_WRAPPER
+            ADD_WRAPPER=${ADD_WRAPPER:-Y}
+
+            if [[ "$ADD_WRAPPER" =~ ^[Yy]$ ]]; then
+                echo "" >> "$SHELL_RC"
+                echo "# Claude Voice tmux wrapper (enables remote session control)" >> "$SHELL_RC"
+                echo "source \"$INSTALL_DIR/claude-wrapper.sh\"" >> "$SHELL_RC"
+                echo "Tmux wrapper added to $SHELL_RC"
+            else
+                echo ""
+                echo "To add manually later:"
+                echo "  echo 'source \"$INSTALL_DIR/claude-wrapper.sh\"' >> $SHELL_RC"
+            fi
         fi
     fi
 fi

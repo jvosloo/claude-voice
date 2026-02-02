@@ -490,6 +490,7 @@ class TestReloadAfk:
              patch("daemon.main.AfkManager") as MockAM:
             new_afk = MagicMock()
             new_afk.is_configured = True
+            new_afk.start_listening.return_value = (True, "")
             MockAM.return_value = new_afk
             d.reload_config()
 
@@ -512,6 +513,7 @@ class TestReloadAfk:
              patch("daemon.main.AfkManager") as MockAM:
             new_afk = MagicMock()
             new_afk.is_configured = True
+            new_afk.start_listening.return_value = (True, "")
             MockAM.return_value = new_afk
             d.reload_config()
 

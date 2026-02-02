@@ -62,6 +62,15 @@ if [ $daemon_changed -eq 0 ]; then
     echo "  No daemon changes"
 fi
 
+# Deploy shell wrapper
+echo ""
+echo "Deploying shell wrapper..."
+if copy_if_changed "$REPO_DIR/claude-wrapper.sh" "$INSTALL_DIR/claude-wrapper.sh"; then
+    :
+else
+    echo "  No wrapper changes"
+fi
+
 # Deploy hooks files
 echo ""
 echo "Deploying hooks files..."

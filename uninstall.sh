@@ -142,9 +142,14 @@ if [ "$KEEP_CONFIG" = true ]; then
     rm -f "$INSTALL_DIR/.mode"
     rm -rf "$INSTALL_DIR/notify_cache"
     rm -f "$INSTALL_DIR/.tts.sock"
+    rm -f "$INSTALL_DIR/.control.sock"
     rm -f "$INSTALL_DIR/claude-voice-daemon"
+    rm -f "$INSTALL_DIR/claude-wrapper.sh"
     rm -f "$INSTALL_DIR/config.yaml.example"
+    rm -f "$INSTALL_DIR/permission_rules.json"
     rm -f "$INSTALL_DIR/.DS_Store"
+    rm -rf "$INSTALL_DIR/tests"
+    # Note: dev/ is shared with the settings app — don't delete it
     # Remove any stray files that shouldn't be there
     rm -f "$INSTALL_DIR/README.md"
     rm -f "$INSTALL_DIR/requirements.txt"
@@ -156,7 +161,14 @@ if [ "$KEEP_CONFIG" = true ]; then
 else
     echo "Removing installation directory..."
     rm -f "$INSTALL_DIR/.tts.sock"
+    rm -f "$INSTALL_DIR/.control.sock"
     rm -rf "$INSTALL_DIR"
+fi
+
+# Remove temp files (session responses, debug logs, PID files)
+if [ -d "/tmp/claude-voice" ]; then
+    echo "Removing temp files..."
+    rm -rf "/tmp/claude-voice"
 fi
 
 echo ""
@@ -184,6 +196,20 @@ if grep -q "claude-voice-daemon" "$SHELL_RC" 2>/dev/null; then
         echo "Run 'source $SHELL_RC' or open a new terminal to apply."
     else
         echo "Aliases kept in $SHELL_RC - remove manually if desired."
+    fi
+fi
+
+# Remove tmux wrapper if present
+if grep -q "claude-wrapper" "$SHELL_RC" 2>/dev/null; then
+    read -p "Remove tmux wrapper from $SHELL_RC? [Y/n]: " DEL_WRAPPER
+    DEL_WRAPPER=${DEL_WRAPPER:-Y}
+
+    if [[ "$DEL_WRAPPER" =~ ^[Yy]$ ]]; then
+        sed -i '' '/# Claude Voice tmux wrapper/d' "$SHELL_RC"
+        sed -i '' '/claude-wrapper/d' "$SHELL_RC"
+        echo "Removed tmux wrapper from $SHELL_RC"
+    else
+        echo "Tmux wrapper kept in $SHELL_RC - remove manually if desired."
     fi
 fi
 echo ""

@@ -282,9 +282,13 @@ class VoiceDaemon:
             self.afk.stop_listening()
             self.afk = AfkManager(new)
             if self.afk.is_configured:
-                self.afk.start_listening(on_toggle=self._toggle_afk)
-            if was_active:
-                self.afk.activate()
+                ok, reason = self.afk.start_listening(on_toggle=self._toggle_afk)
+                if not ok:
+                    print(f"Telegram: failed to connect ({reason})")
+                    from daemon import overlay
+                    overlay.show_flash(f"Telegram: {reason}")
+                elif was_active:
+                    self.afk.activate()
             changed.append("afk")
 
         self.config = new
@@ -719,10 +723,12 @@ class VoiceDaemon:
 
             # Start Telegram polling (always-on for /afk command)
             if self.afk.is_configured:
-                if self.afk.start_listening(on_toggle=self._toggle_afk):
+                ok, reason = self.afk.start_listening(on_toggle=self._toggle_afk)
+                if ok:
                     print("Telegram: listening for /afk command")
                 else:
-                    print("Telegram: failed to connect")
+                    print(f"Telegram: failed to connect ({reason})")
+                    overlay.show_flash(f"Telegram: {reason}")
 
             # Start hotkey listener on background thread
             self.hotkey_listener.start()

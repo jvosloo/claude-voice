@@ -19,7 +19,9 @@ class TestVerify:
         mock_resp.json.return_value = {"ok": True}
 
         with patch("daemon.telegram.requests.get", return_value=mock_resp) as mock_get:
-            assert client.verify() is True
+            ok, reason = client.verify()
+            assert ok is True
+            assert reason == ""
         mock_get.assert_called_once()
 
     def test_failure_status_code(self):
@@ -29,13 +31,28 @@ class TestVerify:
         mock_resp.json.return_value = {"ok": False}
 
         with patch("daemon.telegram.requests.get", return_value=mock_resp):
-            assert client.verify() is False
+            ok, reason = client.verify()
+            assert ok is False
+            assert "invalid bot token" in reason
+
+    def test_server_error(self):
+        client = _make_client()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.json.return_value = {"ok": False}
+
+        with patch("daemon.telegram.requests.get", return_value=mock_resp):
+            ok, reason = client.verify()
+            assert ok is False
+            assert "500" in reason
 
     def test_connection_error(self):
         client = _make_client()
         with patch("daemon.telegram.requests.get",
-                   side_effect=ConnectionError()):
-            assert client.verify() is False
+                   side_effect=requests.ConnectionError()):
+            ok, reason = client.verify()
+            assert ok is False
+            assert "cannot reach" in reason
 
 
 class TestSendMessage:

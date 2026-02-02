@@ -29,13 +29,19 @@ class TelegramClient:
         self._callback_handler = None  # Called with (callback_query_id, data, message_id)
         self._message_handler = None   # Called with (text,)
 
-    def verify(self) -> bool:
-        """Verify bot token and chat_id work. Returns True on success."""
+    def verify(self) -> tuple[bool, str]:
+        """Verify bot token works. Returns (ok, error_reason)."""
         try:
             resp = requests.get(f"{self._base_url}/getMe", timeout=REQUEST_TIMEOUT)
-            return resp.status_code == 200 and resp.json().get("ok", False)
-        except Exception:
-            return False
+            if resp.status_code == 200 and resp.json().get("ok", False):
+                return True, ""
+            if resp.status_code == 401:
+                return False, "invalid bot token"
+            return False, f"Telegram API error ({resp.status_code})"
+        except requests.ConnectionError:
+            return False, "cannot reach Telegram API"
+        except Exception as e:
+            return False, str(e)
 
     def send_message(self, text: str, reply_markup: dict | None = None) -> int | None:
         """Send a message. Returns message_id or None on failure."""
