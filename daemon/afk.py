@@ -8,6 +8,7 @@ from daemon.telegram import TelegramClient
 from daemon.request_queue import RequestQueue, QueuedRequest
 from daemon.request_router import QueueRouter
 from daemon.session_presenter import SingleChatPresenter
+from daemon.tmux_monitor import TmuxMonitor
 
 # Response files directory
 RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
@@ -30,6 +31,8 @@ class AfkManager:
         self._session_contexts = {}  # session -> last known context string
         self._session_tty_paths = {}  # session -> TTY device path (e.g. /dev/ttys005)
         self._reply_target = None  # session that next free text reply goes to
+        self._tmux_monitor = TmuxMonitor()
+        self._tmux_reply = False  # True when reply target is tmux-based (not tty-based)
         self._previous_mode = None  # mode before AFK was activated
         self._on_toggle = None  # callback for /afk command
 
@@ -106,6 +109,7 @@ class AfkManager:
         self._session_contexts.clear()
         self._session_tty_paths.clear()
         self._reply_target = None
+        self._tmux_reply = False
         if self._client:
             if flushed:
                 self._send(f"AFK mode off. Flushed {flushed} pending request(s). Send /afk to reactivate.")
@@ -241,6 +245,41 @@ class AfkManager:
         print(f"AFK: callback received: data={data!r}, msg_id={message_id}, "
               f"queue_active={self._queue.get_active() is not None}")
 
+        # Tmux session buttons
+        if data.startswith("tmux:"):
+            self._client.answer_callback(callback_id, text="OK")
+            self._client.edit_message_reply_markup(message_id)
+            parts = data.split(":", 2)
+            action = parts[1] if len(parts) > 1 else ""
+            session = parts[2] if len(parts) > 2 else ""
+
+            if action == "prompt":
+                # Verify session is still idle
+                status = self._tmux_monitor.get_session_status(session)
+                if status["status"] == "idle":
+                    self._reply_target = session
+                    self._tmux_reply = True
+                    emoji = self._queue.get_session_emoji(session)
+                    self._presenter.send_to_session(
+                        session,
+                        f"\U0001f4ac Send a message to {emoji} [{session}]:"
+                    )
+                else:
+                    self._presenter.send_to_session(
+                        session,
+                        f"\u26a0\ufe0f [{session}] is no longer idle (now: {status['status']})"
+                    )
+            elif action == "queue":
+                # Show pending requests for this session
+                summary = self._queue.get_queue_summary()
+                session_items = [i for i in summary if i['session'] == session]
+                if session_items:
+                    text, markup = self._presenter.format_queue_summary(session_items)
+                    self._presenter.send_to_session(session, text, markup)
+                else:
+                    self._presenter.send_to_session(session, f"No pending requests for [{session}].")
+            return
+
         # Queue management commands work from any message (e.g., /queue summary)
         if data.startswith("cmd:"):
             self._client.answer_callback(callback_id, text=f"Sent: {data}")
@@ -349,6 +388,10 @@ class AfkManager:
             self._send_help()
             return
 
+        if cmd == "/sessions":
+            self._handle_sessions_command()
+            return
+
         # Not in AFK mode
         if not self.active:
             if self._presenter:
@@ -365,31 +408,48 @@ class AfkManager:
 
         if not pending:
             # No queued request — try reply routing
-            if self._reply_target and self._reply_target in self._session_tty_paths:
+            if self._reply_target:
                 session = self._reply_target
-                self._reply_target = None  # Clear before injection to prevent loops
-                success = self._inject_reply(session, text)
-                if success:
-                    emoji = self._queue.get_session_emoji(session)
-                    self._presenter.send_to_session(
-                        session,
-                        f"✓ Sent to {emoji} [{session}]: {_escape_html(text)}"
-                    )
+                self._reply_target = None
+
+                if self._tmux_reply:
+                    # Tmux-based prompt injection
+                    self._tmux_reply = False
+                    success = self._tmux_monitor.send_prompt(session, text)
+                    if success:
+                        emoji = self._queue.get_session_emoji(session)
+                        self._presenter.send_to_session(
+                            session,
+                            f"\u2713 Sent to {emoji} [{session}]: {_escape_html(text)}"
+                        )
+                    else:
+                        self._presenter.send_to_session(
+                            session,
+                            f"\u26a0\ufe0f Failed to send prompt to [{session}]. Session may no longer be idle."
+                        )
+                    return
+                elif session in self._session_tty_paths:
+                    # Existing osascript-based injection
+                    success = self._inject_reply(session, text)
+                    if success:
+                        emoji = self._queue.get_session_emoji(session)
+                        self._presenter.send_to_session(
+                            session,
+                            f"\u2713 Sent to {emoji} [{session}]: {_escape_html(text)}"
+                        )
+                    else:
+                        self._presenter.send_to_session(
+                            session,
+                            f"\u26a0\ufe0f Terminal for [{session}] may be closed. Reply failed."
+                        )
+                        del self._session_tty_paths[session]
+                    return
                 else:
                     self._presenter.send_to_session(
-                        session,
-                        f"⚠️ Terminal for [{session}] may be closed. Reply failed."
+                        "",
+                        f"\u26a0\ufe0f No terminal connected for [{session}]."
                     )
-                    del self._session_tty_paths[session]
-                    self._reply_target = None
-                return
-            elif self._reply_target:
-                self._presenter.send_to_session(
-                    "",
-                    f"⚠️ No terminal connected for [{self._reply_target}]."
-                )
-                self._reply_target = None
-                return
+                    return
             else:
                 self._presenter.send_to_session("", "No active request. Queue is empty.")
                 return
@@ -530,6 +590,7 @@ class AfkManager:
             "/back — deactivate AFK mode\n"
             "/status — show active sessions\n"
             "/queue — show pending requests\n"
+            "/sessions — list tmux sessions and send new prompts\n"
             "/skip — skip current request\n"
             "/flush — clear all pending requests\n"
             "/help — show this message\n"
@@ -537,6 +598,89 @@ class AfkManager:
             "When a request is active, any text you type is\n"
             "sent as the reply."
         )
+
+    def _handle_sessions_command(self) -> None:
+        """Handle /sessions command -- list tmux Claude Code sessions."""
+        if not self._tmux_monitor.is_available():
+            self._send("tmux is not available. Install with: brew install tmux")
+            return
+
+        statuses = self._tmux_monitor.get_all_session_statuses()
+        if not statuses:
+            self._send("No Claude Code sessions found in tmux.")
+            return
+
+        # Cross-reference with request queue for waiting sessions
+        pending_sessions = set()
+        pending_counts = {}
+        summary = self._queue.get_queue_summary()
+        for item in summary:
+            s = item['session']
+            pending_sessions.add(s)
+            pending_counts[s] = pending_counts.get(s, 0) + 1
+
+        now = int(time.time())
+
+        lines = ["\U0001f4cb <b>Sessions</b>\n"]
+        keyboard = []
+
+        for info in statuses:
+            session = info["session"]
+            status = info["status"]
+            emoji = self._queue.get_session_emoji(session)
+
+            # Override status if session has pending requests
+            if session in pending_sessions:
+                count = pending_counts[session]
+                status_text = f"waiting for input ({count} pending)"
+                status_icon = "\U0001f7e1"
+            elif status == "idle":
+                # Calculate idle duration
+                pane_activity = info.get("pane_activity")
+                if pane_activity:
+                    idle_secs = now - pane_activity
+                    if idle_secs < 60:
+                        duration = f"{idle_secs}s"
+                    elif idle_secs < 3600:
+                        duration = f"{idle_secs // 60}m"
+                    else:
+                        duration = f"{idle_secs // 3600}h {(idle_secs % 3600) // 60}m"
+                    status_text = f"idle ({duration})"
+                else:
+                    status_text = "idle"
+                status_icon = "\U0001f7e2"
+            elif status == "working":
+                status_text = "working"
+                status_icon = "\U0001f535"
+            elif status == "dead":
+                status_text = "dead"
+                status_icon = "\u26ab"
+            else:
+                status_text = status
+                status_icon = "\u26aa"
+
+            lines.append(f"{status_icon} {emoji} <b>[{session}]</b> \u2014 {status_text}")
+
+            # Add button for actionable sessions
+            if status == "idle" and session not in pending_sessions:
+                # Truncate session name for callback_data (Telegram 64-byte limit)
+                # "tmux:prompt:" = 12 chars, leaving ~52 chars for session name
+                cb_session = session[:50]
+                keyboard.append([{
+                    "text": f"{emoji} {session} \u2014 send prompt",
+                    "callback_data": f"tmux:prompt:{cb_session}",
+                }])
+            elif session in pending_sessions:
+                # "tmux:queue:" = 11 chars, leaving ~53 chars for session name
+                cb_session = session[:50]
+                keyboard.append([{
+                    "text": f"{emoji} {session} \u2014 show requests",
+                    "callback_data": f"tmux:queue:{cb_session}",
+                }])
+
+        text = "\n".join(lines)
+        markup = {"inline_keyboard": keyboard} if keyboard else None
+        self._send(text, reply_markup=markup)
 
     def _inject_reply(self, session: str, text: str) -> bool:
         """Inject text + Enter into the terminal via osascript keystroke simulation.
@@ -617,6 +761,7 @@ class AfkManager:
         self._session_tty_paths.pop(session, None)
         if self._reply_target == session:
             self._reply_target = None
+            self._tmux_reply = False
 
 
 def _escape_html(text: str) -> str:
