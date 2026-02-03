@@ -358,19 +358,19 @@ class TestUnblockStopHooks:
         assert (s1 / "response_stop").read_text() == "__back__"
         assert (s2 / "response_stop").read_text() == "__back__"
 
-    def test_skips_dirs_with_existing_response(self, tmp_path):
-        """_unblock_stop_hooks() doesn't overwrite existing response files."""
+    def test_overwrites_stale_response_files(self, tmp_path):
+        """_unblock_stop_hooks() overwrites stale followup files with sentinel."""
         afk = _make_afk()
 
         s1 = tmp_path / "sess-a"
         s1.mkdir()
-        (s1 / "response_stop").write_text("pending followup")
+        (s1 / "response_stop").write_text("stale followup")
 
         with patch("daemon.afk.RESPONSE_DIR", str(tmp_path)):
             afk._unblock_stop_hooks()
 
-        # Should NOT overwrite the existing followup
-        assert (s1 / "response_stop").read_text() == "pending followup"
+        # Must overwrite — stale files would be delivered to the next AFK cycle
+        assert (s1 / "response_stop").read_text() == "__back__"
 
     def test_handles_missing_response_dir(self):
         """_unblock_stop_hooks() handles missing RESPONSE_DIR gracefully."""

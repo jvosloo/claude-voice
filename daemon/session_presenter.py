@@ -168,13 +168,12 @@ class SingleChatPresenter(SessionPresenter):
         return text, markup
 
     def format_context_message(self, session: str, emoji: str,
-                               context_text: str, has_tty: bool = False) -> tuple[str, dict]:
+                               context_text: str) -> tuple[str, dict]:
         """Format a context message with Reply button.
 
         Returns (message_text, reply_markup).
         """
-        tty_indicator = " 🖥" if has_tty else ""
-        text = f"{emoji} [{session}]{tty_indicator}\n{context_text}"
+        text = f"{emoji} [{session}]\n{context_text}"
 
         markup = {
             "inline_keyboard": [[

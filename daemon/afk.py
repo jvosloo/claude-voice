@@ -10,7 +10,6 @@ from daemon.telegram import TelegramClient
 from daemon.request_queue import RequestQueue, QueuedRequest
 from daemon.request_router import QueueRouter
 from daemon.session_presenter import SingleChatPresenter
-from daemon.tmux_monitor import TmuxMonitor
 
 # Response files directory
 RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
@@ -38,7 +37,6 @@ class AfkManager:
         self._reply_target = None  # session that next free text reply goes to
         self._last_followup_session = None  # fallback for routing when no explicit target
         self._pending_followups = {}  # session -> list[str] queued messages
-        self._tmux_monitor = TmuxMonitor()
         self._previous_mode = None  # mode before AFK was activated
         self._on_toggle = None  # callback for /afk command
 
@@ -92,6 +90,7 @@ class AfkManager:
             return False
         os.makedirs(RESPONSE_DIR, exist_ok=True)
         self._cleanup_stale_sessions()
+        self._cleanup_response_files()
         self.active = True
         self._send("AFK mode active. Send /help for usage.")
         return True
@@ -214,6 +213,7 @@ class AfkManager:
             return
 
         lines = ["<b>Active sessions:</b>\n"]
+        keyboard = []
 
         # Get all sessions with pending requests from queue
         pending_sessions = set()
@@ -228,10 +228,6 @@ class AfkManager:
             # Determine state
             has_pending = session in pending_sessions
             is_reply_target = self._reply_target == session
-            has_tty = (
-                self._tmux_monitor.is_available()
-                and self._tmux_monitor.get_session_status(session)["status"] != "dead"
-            )
 
             if has_pending:
                 state = "⏳ waiting for you"
@@ -240,13 +236,20 @@ class AfkManager:
             else:
                 state = "idle"
 
-            tty_indicator = " 🖥" if has_tty else ""
             lines.append(
-                f"{emoji} <b>[{session}]</b>{tty_indicator} — {state}\n"
+                f"{emoji} <b>[{session}]</b> — {state}\n"
                 f"{_escape_html(last_line)}\n"
             )
 
-        self._send("\n".join(lines))
+            cb_session = session[:50]
+            keyboard.append([{
+                "text": f"💬 Reply to {emoji} {session}",
+                "callback_data": f"reply:{cb_session}",
+            }])
+
+        text = "\n".join(lines)
+        markup = {"inline_keyboard": keyboard} if keyboard else None
+        self._send(text, reply_markup=markup)
 
     def _flush_queue(self) -> int:
         """Flush all pending requests. Writes __flush__ sentinel so hooks stop waiting.
@@ -263,21 +266,29 @@ class AfkManager:
         print(f"AFK: callback received: data={data!r}, msg_id={message_id}, "
               f"queue_active={self._queue.get_active() is not None}")
 
-        # Tmux session buttons
-        if data.startswith("tmux:"):
+        # Session buttons (from /sessions command)
+        if data.startswith("session:"):
             self._client.answer_callback(callback_id, text="OK")
             self._client.edit_message_reply_markup(message_id)
             parts = data.split(":", 2)
             action = parts[1] if len(parts) > 1 else ""
             session = parts[2] if len(parts) > 2 else ""
 
-            if action == "prompt":
-                self._reply_target = session
+            if action == "context":
                 emoji = self._queue.get_session_emoji(session)
-                self._presenter.send_to_session(
-                    session,
-                    f"\U0001f4ac Send a message to {emoji} [{session}]:"
-                )
+                context = self._session_contexts.get(session, "")
+                if context:
+                    formatted = _markdown_to_telegram_html(context[:TELEGRAM_MAX_CHARS])
+                    text, markup = self._presenter.format_context_message(
+                        session, emoji, formatted,
+                    )
+                    self._presenter.send_to_session(session, text, markup)
+                else:
+                    self._reply_target = session
+                    self._presenter.send_to_session(
+                        session,
+                        f"\U0001f4ac Send a message to {emoji} [{session}]:"
+                    )
             elif action == "queue":
                 # Show pending requests for this session
                 summary = self._queue.get_queue_summary()
@@ -606,30 +617,24 @@ class AfkManager:
         print(f"AFK: queued followup for [{session}], total={count}")
 
     def _unblock_stop_hooks(self) -> None:
-        """Write __back__ sentinel to all active Stop hook response files."""
+        """Write __back__ sentinel to all Stop hook response files.
+
+        Unconditionally overwrites any existing content — this clears both
+        actively-polling hooks AND stale followup files left from a previous
+        AFK cycle (e.g. a followup written after the hook already returned).
+        """
         try:
             for name in os.listdir(RESPONSE_DIR):
                 session_dir = os.path.join(RESPONSE_DIR, name)
                 stop_file = os.path.join(session_dir, "response_stop")
-                if os.path.isdir(session_dir) and not os.path.exists(stop_file):
-                    # Write sentinel so any blocking Stop hook unblocks
+                if os.path.isdir(session_dir):
                     self._write_response(stop_file, "__back__")
         except FileNotFoundError:
             pass
 
     def _handle_sessions_command(self) -> None:
         """Handle /sessions command -- list Claude Code sessions."""
-        # Discover tmux sessions
-        tmux_statuses = {}
-        if self._tmux_monitor.is_available():
-            for info in self._tmux_monitor.get_all_session_statuses():
-                tmux_statuses[info["session"]] = info
-
-        # Also include sessions we know about from context messages
-        known_sessions = set(self._session_contexts.keys())
-        all_sessions = sorted(known_sessions | set(tmux_statuses.keys()))
-
-        if not all_sessions:
+        if not self._session_contexts:
             self._send("No Claude Code sessions found.")
             return
 
@@ -645,46 +650,24 @@ class AfkManager:
         lines = ["\U0001f4cb <b>Sessions</b>\n"]
         keyboard = []
 
-        for session in all_sessions:
+        for session in sorted(self._session_contexts):
             emoji = self._queue.get_session_emoji(session)
-            tmux_info = tmux_statuses.get(session)
+            cb_session = session[:50]
 
-            # Determine status
             if session in pending_sessions:
                 count = pending_counts[session]
                 status_text = f"waiting for input ({count} pending)"
-                status_icon = "\U0001f7e1"
-                status = "waiting"
-            elif tmux_info:
-                status = tmux_info["status"]
-                if status == "idle":
-                    status_text = "idle"
-                    status_icon = "\U0001f7e2"
-                elif status == "working":
-                    status_text = "working"
-                    status_icon = "\U0001f535"
-                else:
-                    status_text = status
-                    status_icon = "\u26aa"
-            else:
-                status = "unknown"
-                status_text = "unknown"
-                status_icon = "\u26aa"
-
-            lines.append(f"{status_icon} {emoji} <b>[{session}]</b> \u2014 {status_text}")
-
-            # Add button for actionable sessions
-            # Truncate session name for callback_data (Telegram 64-byte limit)
-            cb_session = session[:50]
-            if status == "idle" and session not in pending_sessions:
-                keyboard.append([{
-                    "text": f"{emoji} {session} \u2014 send prompt",
-                    "callback_data": f"tmux:prompt:{cb_session}",
-                }])
-            elif session in pending_sessions:
+                lines.append(f"{emoji} <b>[{session}]</b> \u2014 {status_text}")
                 keyboard.append([{
                     "text": f"{emoji} {session} \u2014 show requests",
-                    "callback_data": f"tmux:queue:{cb_session}",
+                    "callback_data": f"session:queue:{cb_session}",
+                }])
+            else:
+                status_text = "active"
+                lines.append(f"{emoji} <b>[{session}]</b> \u2014 {status_text}")
+                keyboard.append([{
+                    "text": f"{emoji} {session} \u2014 show context",
+                    "callback_data": f"session:context:{cb_session}",
                 }])
 
         text = "\n".join(lines)
@@ -750,6 +733,26 @@ class AfkManager:
                         shutil.rmtree(session_dir, ignore_errors=True)
                         print(f"AFK: cleaned stale session dir [{name}]")
                 except OSError:
+                    pass
+        except FileNotFoundError:
+            pass
+
+    def _cleanup_response_files(self) -> None:
+        """Delete stale response_stop files from all session directories.
+
+        Called on activate() so that __back__ sentinels left by the previous
+        deactivation don't cause the first Stop hook to return immediately.
+        No hooks should be blocking at this point (AFK was off).
+        """
+        try:
+            for name in os.listdir(RESPONSE_DIR):
+                session_dir = os.path.join(RESPONSE_DIR, name)
+                if not os.path.isdir(session_dir):
+                    continue
+                stop_file = os.path.join(session_dir, "response_stop")
+                try:
+                    os.remove(stop_file)
+                except FileNotFoundError:
                     pass
         except FileNotFoundError:
             pass

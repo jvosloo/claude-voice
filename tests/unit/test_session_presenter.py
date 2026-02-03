@@ -165,37 +165,22 @@ class TestAskUserQuestionButtons:
 
 class TestContextMessageFormatting:
 
-    def test_format_context_message_with_tty(self):
-        """Context message includes terminal indicator when TTY available."""
+    def test_format_context_message(self):
+        """Context message shows session, context text, and Reply button."""
         client = Mock()
         presenter = SingleChatPresenter(client)
 
         text, markup = presenter.format_context_message(
-            "my-session", "\U0001f7e2", "Hello world", has_tty=True,
+            "my-session", "\U0001f7e2", "Hello world",
         )
 
         assert "[my-session]" in text
-        assert "\U0001f5a5" in text  # computer emoji
         assert "Hello world" in text
 
-        # Reply button
         keyboard = markup["inline_keyboard"]
         assert len(keyboard) == 1
         assert keyboard[0][0]["text"] == "\U0001f4ac Reply"
         assert keyboard[0][0]["callback_data"] == "reply:my-session"
-
-    def test_format_context_message_without_tty(self):
-        """Context message has no terminal indicator without TTY."""
-        client = Mock()
-        presenter = SingleChatPresenter(client)
-
-        text, markup = presenter.format_context_message(
-            "my-session", "\U0001f7e2", "Hello world", has_tty=False,
-        )
-
-        assert "\U0001f5a5" not in text
-        # Reply button still present (button handler checks TTY availability)
-        assert markup["inline_keyboard"][0][0]["callback_data"] == "reply:my-session"
 
 
 class TestSingleChatPresenterQueueSummary:
