@@ -137,17 +137,17 @@ class TestFreeTextReplyRouting:
         mock_deliver.assert_called_once_with("my-session", "hello Claude")
         assert afk._reply_target is None
 
-    def test_free_text_no_target_shows_no_request_message(self):
-        """Without reply target, shows 'No active request' message."""
+    def test_free_text_no_target_no_fallback_shows_error(self):
+        """Without reply target or fallback session, shows error message."""
         afk = _make_afk()
         afk._router.route_text_message = Mock(return_value=None)
-        # No reply target set
+        # No reply target, no last followup session
 
         afk._handle_message("hello Claude")
 
         afk._presenter.send_to_session.assert_called_once()
         msg = afk._presenter.send_to_session.call_args[0][1]
-        assert "No active request" in msg
+        assert "No active session" in msg
 
     def test_reply_target_takes_priority_over_queue(self):
         """When reply target is set, it takes priority over queued requests."""
@@ -656,3 +656,105 @@ class TestStaleSessionCleanup:
             afk.activate()
 
         mock_cleanup.assert_called_once()
+
+
+class TestFallbackFollowupRouting:
+    """Tests for _last_followup_session fallback when no reply target or queue request."""
+
+    def test_second_message_routes_to_last_followup_session(self):
+        """After consuming reply target, next message falls back to last followup session."""
+        afk = _make_afk()
+        afk._router.route_text_message = Mock(return_value=None)
+        afk._session_contexts["my-session"] = "some context"
+        afk._reply_target = "my-session"
+
+        # First message: consumes _reply_target
+        with patch.object(afk, '_deliver_followup') as mock_deliver:
+            afk._handle_message("first message")
+        mock_deliver.assert_called_once_with("my-session", "first message")
+        assert afk._reply_target is None
+
+        # Second message: should fall back to _last_followup_session
+        with patch.object(afk, '_deliver_followup') as mock_deliver:
+            afk._handle_message("second message")
+        mock_deliver.assert_called_once_with("my-session", "second message")
+
+    def test_fallback_requires_session_in_contexts(self):
+        """Fallback does not route to a session that has been cleaned up."""
+        afk = _make_afk()
+        afk._router.route_text_message = Mock(return_value=None)
+        afk._last_followup_session = "gone-session"
+        # Session NOT in _session_contexts (cleaned up)
+
+        afk._handle_message("hello")
+
+        afk._presenter.send_to_session.assert_called_once()
+        msg = afk._presenter.send_to_session.call_args[0][1]
+        assert "No active session" in msg
+
+    def test_fallback_not_used_when_queue_active(self):
+        """When queue has an active request, it takes priority over fallback."""
+        afk = _make_afk()
+        active_req = QueuedRequest("sess-a", "input", "Enter:", "/tmp/r")
+        afk._router.route_text_message = Mock(return_value=active_req)
+        afk._last_followup_session = "sess-b"
+        afk._session_contexts["sess-b"] = "context"
+
+        with patch.object(afk, '_write_response'), \
+             patch.object(afk, '_deliver_followup') as mock_deliver:
+            afk._handle_message("my answer")
+
+        # Should route to queue, not fallback
+        mock_deliver.assert_not_called()
+
+    def test_no_fallback_no_sessions_shows_error(self):
+        """When no fallback session and no sessions known, shows error."""
+        afk = _make_afk()
+        afk._router.route_text_message = Mock(return_value=None)
+
+        afk._handle_message("hello")
+
+        msg = afk._presenter.send_to_session.call_args[0][1]
+        assert "No active session" in msg
+
+    def test_context_hook_sets_last_followup_session(self):
+        """When a Stop hook sends context, it sets _last_followup_session."""
+        afk = _make_afk()
+
+        with patch("daemon.afk.RESPONSE_DIR", "/tmp/test"):
+            afk.handle_hook_request({
+                "session": "my-session",
+                "type": "context",
+                "context": "Hello",
+            })
+
+        assert afk._last_followup_session == "my-session"
+
+    def test_deactivate_clears_last_followup_session(self):
+        """deactivate() clears _last_followup_session."""
+        afk = _make_afk()
+        afk._last_followup_session = "sess-a"
+
+        afk.deactivate()
+
+        assert afk._last_followup_session is None
+
+    def test_cleanup_clears_matching_last_followup_session(self):
+        """cleanup_session clears _last_followup_session when it matches."""
+        afk = _make_afk()
+        afk._last_followup_session = "sess-a"
+
+        with patch("daemon.afk.os.path.exists", return_value=False):
+            afk.cleanup_session("sess-a")
+
+        assert afk._last_followup_session is None
+
+    def test_cleanup_preserves_other_last_followup_session(self):
+        """cleanup_session doesn't clear _last_followup_session for a different session."""
+        afk = _make_afk()
+        afk._last_followup_session = "sess-b"
+
+        with patch("daemon.afk.os.path.exists", return_value=False):
+            afk.cleanup_session("sess-a")
+
+        assert afk._last_followup_session == "sess-b"

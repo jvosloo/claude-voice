@@ -155,8 +155,8 @@ class TestFollowupDelivery:
         assert afk._reply_target is None
 
     @patch("daemon.afk.TmuxMonitor")
-    def test_no_reply_target_shows_no_request_message(self, MockMonitor):
-        """Without reply target, shows 'No active request' message."""
+    def test_no_reply_target_shows_no_active_session_message(self, MockMonitor):
+        """Without reply target or fallback session, shows error message."""
         config = _make_config()
         afk = AfkManager(config)
         afk.active = True
@@ -169,4 +169,4 @@ class TestFollowupDelivery:
 
         call_args = afk._presenter.send_to_session.call_args
         msg = call_args[0][1]
-        assert "No active request" in msg
+        assert "No active session" in msg

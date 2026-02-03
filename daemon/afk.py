@@ -36,6 +36,7 @@ class AfkManager:
         self._state_lock = threading.Lock()  # protects compound state operations
         self._session_contexts = {}  # session -> last known context string
         self._reply_target = None  # session that next free text reply goes to
+        self._last_followup_session = None  # fallback for routing when no explicit target
         self._pending_followups = {}  # session -> list[str] queued messages
         self._tmux_monitor = TmuxMonitor()
         self._previous_mode = None  # mode before AFK was activated
@@ -111,6 +112,7 @@ class AfkManager:
         with self._state_lock:
             self._session_contexts.clear()
             self._reply_target = None
+            self._last_followup_session = None
             self._pending_followups.clear()
         if self._client:
             if flushed:
@@ -149,6 +151,7 @@ class AfkManager:
         if req_type == "context":
             emoji = self._queue.get_session_emoji(session)
             self._reply_target = session
+            self._last_followup_session = session
 
             # Send context to Telegram with Reply button
             formatted_context = _markdown_to_telegram_html(display_context[:TELEGRAM_MAX_CHARS])
@@ -407,13 +410,20 @@ class AfkManager:
             if target:
                 self._reply_target = None
         if target:
+            self._last_followup_session = target
             self._deliver_followup(target, text)
             return
 
         pending = self._router.route_text_message(text)
 
         if not pending:
-            self._presenter.send_to_session("", "No active request. Send a message after Claude responds.")
+            fallback = self._last_followup_session
+            if fallback and fallback in self._session_contexts:
+                self._deliver_followup(fallback, text)
+                return
+            self._presenter.send_to_session(
+                "", "No active session. Use the Reply button or /sessions to send a message."
+            )
             return
 
         # For permission requests, treat text as a question/comment
@@ -564,6 +574,7 @@ class AfkManager:
 
     def _deliver_followup(self, session: str, text: str) -> None:
         """Deliver a follow-up message to a session's Stop hook response file."""
+        self._last_followup_session = session
         # Check if session directory exists before creating it — if it doesn't,
         # no Stop hook has ever registered for this session, so queue instead.
         session_dir = os.path.join(RESPONSE_DIR, session)
@@ -718,6 +729,8 @@ class AfkManager:
             self._pending_followups.pop(session, None)
             if self._reply_target == session:
                 self._reply_target = None
+            if self._last_followup_session == session:
+                self._last_followup_session = None
 
     def _cleanup_stale_sessions(self) -> None:
         """Remove session directories older than STALE_SESSION_AGE.
