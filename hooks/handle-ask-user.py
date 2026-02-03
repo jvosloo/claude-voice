@@ -17,7 +17,7 @@ import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import send_to_daemon, make_debug_logger, read_mode, wait_for_response, ASK_USER_FLAG
+from _common import send_to_daemon, make_debug_logger, read_mode, wait_for_response, ASK_USER_FLAG, get_session
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/ask-user-debug.log"))
 
@@ -57,7 +57,7 @@ def main():
 
     debug(f"Got {len(questions)} questions")
 
-    session = os.path.basename(os.getcwd())
+    session = get_session(hook_input)
 
     # Build a readable prompt for Telegram
     prompt_lines = []

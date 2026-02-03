@@ -20,7 +20,7 @@ import time
 sys.path.insert(0, os.path.dirname(__file__))
 from _common import (
     send_to_daemon, wait_for_response, make_debug_logger, read_mode,
-    SILENT_FLAG, store_permission_rule, check_permission_rules,
+    SILENT_FLAG, store_permission_rule, check_permission_rules, get_session,
 )
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/permission_hook.log"))
@@ -103,7 +103,7 @@ def main():
         print(json.dumps(output))
         return
 
-    session = os.path.basename(os.getcwd())
+    session = get_session(hook_input)
 
     # Send to daemon
     debug("Sending to daemon...")

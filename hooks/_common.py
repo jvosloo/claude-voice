@@ -48,16 +48,33 @@ def make_debug_logger(log_path: str):
     return debug
 
 
-def send_to_daemon(payload: dict, with_context: bool = False, raw_text: str = "") -> dict | None:
+def get_session(hook_input: dict | None = None) -> str:
+    """Derive a unique, human-readable session key.
+
+    Uses the Claude Code session_id (UUID) from hook input combined with
+    the project directory name to produce a key like "claude-voice_c12d0f43".
+    Falls back to just the directory basename if session_id is unavailable.
+    """
+    project = os.path.basename(os.getcwd())
+    if hook_input:
+        session_id = hook_input.get("session_id", "")
+        if session_id:
+            return f"{project}_{session_id[:8]}"
+    return project
+
+
+def send_to_daemon(payload: dict, with_context: bool = False, raw_text: str = "",
+                   hook_input: dict | None = None) -> dict | None:
     """Send JSON to daemon and receive a JSON response.
 
     Args:
         payload: JSON payload to send.
         with_context: If True, add session/context fields for AFK routing.
         raw_text: Original unprocessed text (used for context extraction).
+        hook_input: Raw hook input JSON (used to extract session_id).
     """
     if with_context:
-        session = os.path.basename(os.getcwd())
+        session = get_session(hook_input)
         source = raw_text or payload.get("text", "")
         context_lines = source.strip().split("\n")[-10:] if source else []
         payload = {

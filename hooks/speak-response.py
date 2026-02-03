@@ -11,7 +11,7 @@ import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import SILENT_FLAG, send_to_daemon, read_mode, wait_for_response, AFK_STOP_HOOK_TIMEOUT, make_debug_logger
+from _common import SILENT_FLAG, send_to_daemon, read_mode, wait_for_response, AFK_STOP_HOOK_TIMEOUT, make_debug_logger, get_session
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/stop_hook.log"))
 
@@ -32,8 +32,26 @@ def load_config():
         return {}
 
 def _wait_for_transcript_flush(transcript_path: str, timeout: float = 2.0) -> None:
-    """Wait for the transcript file to stop growing (flush complete)."""
+    """Wait for the transcript file to receive new content and stabilise."""
     deadline = time.time() + timeout
+
+    try:
+        initial_size = os.path.getsize(transcript_path)
+    except OSError:
+        return
+
+    # Phase 1: wait for new content (up to 500ms)
+    growth_deadline = min(time.time() + 0.5, deadline)
+    while time.time() < growth_deadline:
+        time.sleep(0.1)
+        try:
+            cur_size = os.path.getsize(transcript_path)
+        except OSError:
+            return
+        if cur_size > initial_size:
+            break
+
+    # Phase 2: wait for the file to stop growing
     prev_size = -1
     while time.time() < deadline:
         try:
@@ -41,7 +59,6 @@ def _wait_for_transcript_flush(transcript_path: str, timeout: float = 2.0) -> No
         except OSError:
             break
         if cur_size == prev_size:
-            # File hasn't grown since last check — flush is done
             break
         prev_size = cur_size
         time.sleep(0.15)
@@ -164,7 +181,7 @@ def main():
         "voice": config.get("voice", "af_heart"),
         "speed": config.get("speed", 1.0),
         "lang_code": config.get("lang_code", "a"),
-    }, with_context=True, raw_text=raw_text)
+    }, with_context=True, raw_text=raw_text, hook_input=hook_input)
 
     # In AFK mode, block waiting for a follow-up message from Telegram
     if not response or not response.get("wait"):

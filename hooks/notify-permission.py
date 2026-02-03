@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from _common import (
     send_to_daemon, make_debug_logger, read_mode,
-    SILENT_FLAG, ASK_USER_FLAG,
+    SILENT_FLAG, ASK_USER_FLAG, get_session,
 )
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/permission_hook.log"))
@@ -48,7 +48,7 @@ def main():
     if hook_input.get("notification_type") != "permission_prompt":
         return
 
-    session = os.path.basename(os.getcwd())
+    session = get_session(hook_input)
     message = hook_input.get("message", "Permission needed")
     debug(f"Hook fired: session={session}, mode={mode}")
 
