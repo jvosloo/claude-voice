@@ -179,6 +179,15 @@ class TestHandleUpdate:
         handler.assert_not_called()
 
 
+def _setup_poll_session(client, fake_get):
+    """Set up a mock poll session for _poll_loop tests."""
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(side_effect=fake_get)
+    client._poll_session = mock_session
+    client._polling = True
+    return mock_session
+
+
 class TestPollLoopResilience:
 
     def test_retries_on_api_error(self):
@@ -198,9 +207,8 @@ class TestPollLoopResilience:
                 resp.json.return_value = {"ok": True, "result": []}
             return resp
 
-        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
-             patch("daemon.telegram.time.sleep"):
-            client._polling = True
+        _setup_poll_session(client, fake_get)
+        with patch("daemon.telegram.time.sleep"):
             client._poll_loop()
 
         # Survived 3 API errors and reached the 4th call
@@ -222,9 +230,8 @@ class TestPollLoopResilience:
             resp.json.return_value = {"ok": True, "result": []}
             return resp
 
-        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
-             patch("daemon.telegram.time.sleep"):
-            client._polling = True
+        _setup_poll_session(client, fake_get)
+        with patch("daemon.telegram.time.sleep"):
             client._poll_loop()
 
         assert call_count == 7
@@ -243,9 +250,8 @@ class TestPollLoopResilience:
             resp.json.return_value = {"ok": True, "result": []}
             return resp
 
-        with patch("daemon.telegram.requests.get", side_effect=fake_get):
-            client._polling = True
-            client._poll_loop()
+        _setup_poll_session(client, fake_get)
+        client._poll_loop()
 
         assert call_count == 3
         assert client._polling is False
@@ -277,9 +283,8 @@ class TestPollLoopResilience:
         def fake_sleep(seconds):
             sleep_calls.append(seconds)
 
-        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
-             patch("daemon.telegram.time.sleep", side_effect=fake_sleep):
-            client._polling = True
+        _setup_poll_session(client, fake_get)
+        with patch("daemon.telegram.time.sleep", side_effect=fake_sleep):
             client._poll_loop()
 
         # After success at call 3, the error at call 4 should have
@@ -302,11 +307,72 @@ class TestPollLoopResilience:
             resp.json.return_value = {"ok": True, "result": []}
             return resp
 
-        with patch("daemon.telegram.requests.get", side_effect=fake_get), \
-             patch("daemon.telegram.time.sleep") as mock_sleep:
-            client._polling = True
+        _setup_poll_session(client, fake_get)
+        with patch("daemon.telegram.time.sleep") as mock_sleep:
             client._poll_loop()
 
         # Timeouts should NOT trigger sleep (no backoff)
         mock_sleep.assert_not_called()
         assert call_count == 4
+
+    def test_exits_cleanly_when_session_closed(self):
+        """Poll loop exits without backoff when session is closed by stop_polling."""
+        client = _make_client()
+        call_count = 0
+
+        def fake_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Simulate session.close() interrupting the request
+                client._polling = False
+                raise ConnectionError("Session closed")
+            resp = MagicMock()
+            resp.json.return_value = {"ok": True, "result": []}
+            return resp
+
+        _setup_poll_session(client, fake_get)
+        with patch("daemon.telegram.time.sleep") as mock_sleep:
+            client._poll_loop()
+
+        # Should exit immediately without sleeping (no backoff)
+        mock_sleep.assert_not_called()
+        assert call_count == 1
+
+
+class TestGracefulShutdown:
+
+    def test_stop_polling_closes_session(self):
+        """stop_polling() closes the requests.Session to interrupt blocking calls."""
+        client = _make_client()
+        mock_session = MagicMock()
+        client._poll_session = mock_session
+        client._polling = True
+        # No thread to join
+        client._poll_thread = None
+
+        client.stop_polling()
+
+        mock_session.close.assert_called_once()
+        assert client._poll_session is None
+        assert client._polling is False
+
+    def test_stop_polling_without_session(self):
+        """stop_polling() handles case where session was never created."""
+        client = _make_client()
+        client._polling = False
+        client._poll_session = None
+        client._poll_thread = None
+
+        client.stop_polling()  # Should not raise
+
+    def test_start_polling_creates_session(self):
+        """start_polling() creates a requests.Session for the poll loop."""
+        client = _make_client()
+        client.start_polling()
+
+        assert client._poll_session is not None
+        assert client._polling is True
+
+        # Clean up
+        client.stop_polling()

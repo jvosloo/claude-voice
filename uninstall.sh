@@ -12,6 +12,8 @@ CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 if [ -d "$INSTALL_DIR/logs" ]; then
     LOG_FILE="$INSTALL_DIR/logs/uninstall-$(date +%Y%m%d-%H%M%S).log"
     exec > >(tee -a "$LOG_FILE") 2>&1
+    TEE_PID=$!
+    trap 'kill $TEE_PID 2>/dev/null; wait $TEE_PID 2>/dev/null' EXIT
     echo "Uninstall log: $LOG_FILE"
     echo ""
 fi
@@ -60,7 +62,13 @@ if pgrep -f "claude-voice/daemon/main.py" >/dev/null 2>&1; then
 fi
 
 if [ "$DAEMON_STOPPED" = true ]; then
-    sleep 1
+    # Wait up to 5 seconds for daemon to exit
+    for i in 1 2 3 4 5; do
+        if ! pgrep -f "claude-voice/daemon/main.py" >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
 fi
 
 # Remove Claude Code hooks
@@ -73,26 +81,55 @@ rm -f "$CLAUDE_HOOKS_DIR/permission-request.py"
 rm -f "$CLAUDE_HOOKS_DIR/handle-ask-user.py"
 rm -f "$CLAUDE_HOOKS_DIR/_common.py"
 
-# Remove hooks from settings.json
-if [ -f "$CLAUDE_SETTINGS" ] && grep -q '"Stop"\|"Notification"\|"PreToolUse"\|"PermissionRequest"' "$CLAUDE_SETTINGS"; then
+# Remove hooks from settings.json (only claude-voice entries, preserve others)
+if [ -f "$CLAUDE_SETTINGS" ] && grep -q 'claude/hooks/' "$CLAUDE_SETTINGS"; then
     echo "Removing Claude Voice hooks from Claude settings..."
-    python3 << 'EOF'
+    SETTINGS_PYTHON="${INSTALL_DIR}/venv/bin/python3"
+    # Fall back to system python if venv is already gone
+    if [ ! -x "$SETTINGS_PYTHON" ]; then
+        SETTINGS_PYTHON="python3"
+    fi
+    "$SETTINGS_PYTHON" << 'EOF'
 import json
 import os
 
 settings_path = os.path.expanduser("~/.claude/settings.json")
+
+# Claude-voice hook command paths
+CV_COMMANDS = {
+    "~/.claude/hooks/speak-response.py",
+    "~/.claude/hooks/notify-permission.py",
+    "~/.claude/hooks/handle-ask-user.py",
+    "~/.claude/hooks/permission-request.py",
+}
+
+def is_cv_hook(entry):
+    """Check if a hook entry belongs to claude-voice."""
+    for hook in entry.get("hooks", []):
+        if hook.get("command") in CV_COMMANDS:
+            return True
+    return False
+
 try:
-    with open(settings_path, 'r') as f:
+    with open(settings_path) as f:
         settings = json.load(f)
 
-    if 'hooks' in settings:
-        for hook_name in ['Stop', 'Notification', 'PreToolUse', 'PermissionRequest']:
-            settings['hooks'].pop(hook_name, None)
+    if "hooks" in settings:
+        for category in list(settings["hooks"]):
+            entries = settings["hooks"][category]
+            if not isinstance(entries, list):
+                continue
+            # Keep only non-claude-voice entries
+            kept = [e for e in entries if not is_cv_hook(e)]
+            if kept:
+                settings["hooks"][category] = kept
+            else:
+                del settings["hooks"][category]
         # Clean up empty hooks object
-        if not settings['hooks']:
-            del settings['hooks']
+        if not settings["hooks"]:
+            del settings["hooks"]
 
-    with open(settings_path, 'w') as f:
+    with open(settings_path, "w") as f:
         json.dump(settings, f, indent=2)
 
     print("Removed Claude Voice hooks from settings.json")
@@ -131,31 +168,14 @@ fi
 # Remove main installation directory
 echo ""
 if [ "$KEEP_CONFIG" = true ]; then
-    echo "Removing installation (keeping preserved files)..."
-    # Remove everything except what user chose to keep
-    rm -rf "$INSTALL_DIR/daemon"
-    rm -rf "$INSTALL_DIR/venv"
-    rm -rf "$INSTALL_DIR/logs"
-    rm -f "$INSTALL_DIR/daemon.pid"
-    rm -f "$INSTALL_DIR/.silent"
-    rm -f "$INSTALL_DIR/.mode"
-    rm -rf "$INSTALL_DIR/notify_cache"
-    rm -f "$INSTALL_DIR/.tts.sock"
-    rm -f "$INSTALL_DIR/.control.sock"
-    rm -f "$INSTALL_DIR/claude-voice-daemon"
-    rm -f "$INSTALL_DIR/claude-wrapper.sh"
-    rm -f "$INSTALL_DIR/config.yaml.example"
-    rm -f "$INSTALL_DIR/permission_rules.json"
-    rm -f "$INSTALL_DIR/.DS_Store"
-    rm -rf "$INSTALL_DIR/tests"
-    # Note: dev/ is shared with the settings app — don't delete it
-    # Remove any stray files that shouldn't be there
-    rm -f "$INSTALL_DIR/README.md"
-    rm -f "$INSTALL_DIR/requirements.txt"
-    rm -f "$INSTALL_DIR/install.sh"
-    rm -rf "$INSTALL_DIR/models"
-
-    # Remove directory if empty
+    echo "Removing installation (keeping config.yaml and dev/)..."
+    # Remove everything except config.yaml and dev/ (shared with settings app)
+    find "$INSTALL_DIR" -mindepth 1 \
+        -not -name "config.yaml" \
+        -not -name "dev" \
+        -not -path "$INSTALL_DIR/dev/*" \
+        -delete 2>/dev/null
+    # Remove directory if empty (will fail if config.yaml or dev/ remain)
     rmdir "$INSTALL_DIR" 2>/dev/null || true
 else
     echo "Removing installation directory..."
@@ -190,9 +210,9 @@ if grep -q "claude-voice-daemon" "$SHELL_RC" 2>/dev/null; then
     DEL_ALIASES=${DEL_ALIASES:-Y}
 
     if [[ "$DEL_ALIASES" =~ ^[Yy]$ ]]; then
-        # Remove the aliases and the comment line
-        sed -i '' '/# Claude Voice aliases/d' "$SHELL_RC"
-        sed -i '' '/claude-voice-daemon/d' "$SHELL_RC"
+        # Remove only the exact alias lines and their comment header
+        sed -i '' '/^# Claude Voice aliases$/d' "$SHELL_RC"
+        sed -i '' '/^alias cv[fs]\{0,1\}="~\/\.claude-voice\/claude-voice-daemon/d' "$SHELL_RC"
         echo "Removed aliases from $SHELL_RC"
         echo "Run 'source $SHELL_RC' or open a new terminal to apply."
     else

@@ -48,6 +48,8 @@ _spin_run() {
 mkdir -p "$INSTALL_DIR/logs"
 LOG_FILE="$INSTALL_DIR/logs/install-$(date +%Y%m%d-%H%M%S).log"
 exec > >(tee -a "$LOG_FILE") 2>&1
+TEE_PID=$!
+trap 'kill $TEE_PID 2>/dev/null; wait $TEE_PID 2>/dev/null' EXIT
 
 echo "Install log: $LOG_FILE"
 echo ""
@@ -120,13 +122,19 @@ if [ "$IS_UPDATE" = true ]; then
     fi
 
     if [ "$DAEMON_STOPPED" = true ]; then
-        sleep 1
+        # Wait up to 5 seconds for daemon to exit
+        for i in 1 2 3 4 5; do
+            if ! pgrep -f "claude-voice/daemon/main.py" >/dev/null 2>&1; then
+                break
+            fi
+            sleep 1
+        done
     fi
 fi
 
 # Create directories
 echo "Creating directories..."
-mkdir -p "$INSTALL_DIR"/{daemon,models/whisper,logs}
+mkdir -p "$INSTALL_DIR"/{daemon,logs}
 mkdir -p "$CLAUDE_HOOKS_DIR"
 
 # Copy daemon files (always update these)
@@ -148,10 +156,6 @@ else
     echo "Keeping existing config.yaml"
     # Always update the example file so users can see new options
     cp "$SCRIPT_DIR/config.yaml.example" "$INSTALL_DIR/config.yaml.example"
-    # Check if example has new options
-    if ! diff -q "$INSTALL_DIR/config.yaml" "$INSTALL_DIR/config.yaml.example" >/dev/null 2>&1; then
-        echo "  Note: config.yaml.example updated - check for new options"
-    fi
 fi
 
 # Find suitable Python (3.12+ required for mlx-audio dependencies)
@@ -304,117 +308,67 @@ chmod +x "$CLAUDE_HOOKS_DIR/notify-permission.py"
 chmod +x "$CLAUDE_HOOKS_DIR/permission-request.py"
 chmod +x "$CLAUDE_HOOKS_DIR/handle-ask-user.py"
 
-# Update Claude settings for hook
+# Update Claude settings for hooks
 echo "Configuring Claude Code settings..."
-if [ -f "$CLAUDE_SETTINGS" ]; then
-    # Check if hooks already exist (check for PermissionRequest as marker for latest version)
-    if grep -q '"PermissionRequest"' "$CLAUDE_SETTINGS"; then
-        echo "Hooks already configured in settings.json"
-    else
-        # Add/update hooks in existing settings
-        python3 << 'EOF'
+"$INSTALL_DIR/venv/bin/python3" << 'EOF'
 import json
 import os
 
 settings_path = os.path.expanduser("~/.claude/settings.json")
-with open(settings_path, 'r') as f:
-    settings = json.load(f)
 
-if 'hooks' not in settings:
-    settings['hooks'] = {}
+# Claude Voice hook definitions
+CV_HOOKS = {
+    "Stop": {"matcher": "", "command": "~/.claude/hooks/speak-response.py"},
+    "Notification": {"matcher": "permission_prompt", "command": "~/.claude/hooks/notify-permission.py"},
+    "PreToolUse": {"matcher": "AskUserQuestion", "command": "~/.claude/hooks/handle-ask-user.py"},
+    "PermissionRequest": {"matcher": "", "command": "~/.claude/hooks/permission-request.py"},
+}
 
-settings['hooks']['Stop'] = [{
-    "matcher": "",
-    "hooks": [{
-        "type": "command",
-        "command": "~/.claude/hooks/speak-response.py"
-    }]
-}]
+# All claude-voice hook script filenames (for filtering)
+CV_COMMANDS = {h["command"] for h in CV_HOOKS.values()}
 
-settings['hooks']['Notification'] = [{
-    "matcher": "permission_prompt",
-    "hooks": [{
-        "type": "command",
-        "command": "~/.claude/hooks/notify-permission.py"
-    }]
-}]
+def is_cv_hook(entry):
+    """Check if a hook entry belongs to claude-voice."""
+    for hook in entry.get("hooks", []):
+        if hook.get("command") in CV_COMMANDS:
+            return True
+    return False
 
-settings['hooks']['PreToolUse'] = [{
-    "matcher": "AskUserQuestion",
-    "hooks": [{
-        "type": "command",
-        "command": "~/.claude/hooks/handle-ask-user.py"
-    }]
-}]
+try:
+    with open(settings_path) as f:
+        settings = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    settings = {}
 
-settings['hooks']['PermissionRequest'] = [{
-    "matcher": "",
-    "hooks": [{
-        "type": "command",
-        "command": "~/.claude/hooks/permission-request.py"
-    }]
-}]
+if "hooks" not in settings:
+    settings["hooks"] = {}
 
-with open(settings_path, 'w') as f:
+changed = False
+for category, defn in CV_HOOKS.items():
+    existing = settings["hooks"].get(category, [])
+
+    # Filter out old claude-voice entries, keep everything else
+    other_hooks = [e for e in existing if not is_cv_hook(e)]
+
+    # Append our hook
+    cv_entry = {
+        "matcher": defn["matcher"],
+        "hooks": [{"type": "command", "command": defn["command"]}],
+    }
+    new_list = other_hooks + [cv_entry]
+
+    if new_list != existing:
+        changed = True
+    settings["hooks"][category] = new_list
+
+with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
 
-print("Added Stop, Notification, PreToolUse, and PermissionRequest hooks to settings.json")
+if changed:
+    print("Updated Claude Voice hooks in settings.json (preserved other hooks)")
+else:
+    print("Hooks already configured in settings.json")
 EOF
-    fi
-else
-    # Create new settings file
-    cat > "$CLAUDE_SETTINGS" << 'EOF'
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/speak-response.py"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "permission_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/notify-permission.py"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "AskUserQuestion",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/handle-ask-user.py"
-          }
-        ]
-      }
-    ],
-    "PermissionRequest": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/hooks/permission-request.py"
-          }
-        ]
-      }
-    ]
-  }
-}
-EOF
-    echo "Created settings.json with Stop, Notification, PreToolUse, and PermissionRequest hooks"
-fi
 
 # macOS permissions check
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -529,36 +483,6 @@ echo "  afk:"
 echo "    telegram:"
 echo "      bot_token: \"your-bot-token\""
 echo "      chat_id: \"your-chat-id\""
-echo ""
-
-# macOS Automation permissions (trigger prompts now so they don't surprise the user later)
-echo "=================================="
-echo "macOS Permissions"
-echo "=================================="
-echo ""
-echo "Claude Voice needs Automation permission to type transcribed text and"
-echo "interact with terminal sessions. macOS will show permission dialogs now —"
-echo "please click OK/Allow on each one."
-echo ""
-read -p "Press Enter to check permissions..." _
-
-# Trigger Terminal.app automation permission (needed for AFK reply injection)
-if osascript -e 'tell application "Terminal" to get name of front window' &>/dev/null; then
-    echo "  ✓ Terminal.app automation: allowed"
-else
-    echo "  ✓ Terminal.app automation: prompted (allow in the dialog)"
-    # Try again in case user just approved it
-    osascript -e 'tell application "Terminal" to get name of front window' &>/dev/null
-fi
-
-# Trigger System Events automation permission (needed for keystroke simulation)
-if osascript -e 'tell application "System Events" to get name of first process' &>/dev/null; then
-    echo "  ✓ System Events automation: allowed"
-else
-    echo "  ✓ System Events automation: prompted (allow in the dialog)"
-    osascript -e 'tell application "System Events" to get name of first process' &>/dev/null
-fi
-
 echo ""
 
 # Add shell aliases (only on fresh install)

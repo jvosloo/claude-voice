@@ -2,8 +2,9 @@
 
 import os
 import threading
+import time
 from unittest.mock import Mock, patch
-from daemon.afk import AfkManager
+from daemon.afk import AfkManager, STALE_SESSION_AGE
 from daemon.request_queue import QueuedRequest
 from daemon.session_presenter import _safe_callback_data
 from daemon.config import (
@@ -547,3 +548,111 @@ class TestStateLock:
         afk = _make_afk()
         assert hasattr(afk, '_state_lock')
         assert isinstance(afk._state_lock, type(threading.Lock()))
+
+
+class TestAtomicWrite:
+    """Verify _write_response uses atomic write-then-rename."""
+
+    def test_file_created_with_correct_content(self, tmp_path):
+        """_write_response creates a file with the expected content."""
+        afk = _make_afk()
+        path = str(tmp_path / "response")
+
+        afk._write_response(path, "test content")
+
+        assert open(path).read() == "test content"
+
+    def test_no_temp_files_left_behind(self, tmp_path):
+        """_write_response doesn't leave .resp_ temp files on success."""
+        afk = _make_afk()
+        path = str(tmp_path / "response")
+
+        afk._write_response(path, "test content")
+
+        # Only the final file should exist
+        files = os.listdir(tmp_path)
+        assert files == ["response"]
+
+    def test_overwrites_existing_file(self, tmp_path):
+        """_write_response overwrites an existing file atomically."""
+        afk = _make_afk()
+        path = str(tmp_path / "response")
+
+        afk._write_response(path, "first")
+        afk._write_response(path, "second")
+
+        assert open(path).read() == "second"
+
+    def test_creates_parent_directory(self, tmp_path):
+        """_write_response creates parent directories if needed."""
+        afk = _make_afk()
+        path = str(tmp_path / "nested" / "dir" / "response")
+
+        afk._write_response(path, "deep content")
+
+        assert open(path).read() == "deep content"
+
+
+class TestStaleSessionCleanup:
+    """Verify _cleanup_stale_sessions removes old session dirs."""
+
+    def test_removes_old_session_dirs(self, tmp_path):
+        """Session dirs older than STALE_SESSION_AGE are removed."""
+        afk = _make_afk()
+
+        # Create a stale session dir
+        old_dir = tmp_path / "old-session"
+        old_dir.mkdir()
+        # Set mtime to 2 hours ago
+        old_time = time.time() - STALE_SESSION_AGE - 3600
+        os.utime(old_dir, (old_time, old_time))
+
+        with patch("daemon.afk.RESPONSE_DIR", str(tmp_path)):
+            afk._cleanup_stale_sessions()
+
+        assert not old_dir.exists()
+
+    def test_keeps_recent_session_dirs(self, tmp_path):
+        """Session dirs younger than STALE_SESSION_AGE are kept."""
+        afk = _make_afk()
+
+        recent_dir = tmp_path / "recent-session"
+        recent_dir.mkdir()
+        # mtime is now (default), well within threshold
+
+        with patch("daemon.afk.RESPONSE_DIR", str(tmp_path)):
+            afk._cleanup_stale_sessions()
+
+        assert recent_dir.exists()
+
+    def test_handles_missing_response_dir(self):
+        """_cleanup_stale_sessions handles missing RESPONSE_DIR gracefully."""
+        afk = _make_afk()
+
+        with patch("daemon.afk.RESPONSE_DIR", "/nonexistent/dir"):
+            afk._cleanup_stale_sessions()  # Should not raise
+
+    def test_ignores_files_in_response_dir(self, tmp_path):
+        """_cleanup_stale_sessions only considers directories, not files."""
+        afk = _make_afk()
+
+        # Create a stale file (not a directory)
+        stale_file = tmp_path / "stale-file"
+        stale_file.write_text("data")
+        old_time = time.time() - STALE_SESSION_AGE - 3600
+        os.utime(stale_file, (old_time, old_time))
+
+        with patch("daemon.afk.RESPONSE_DIR", str(tmp_path)):
+            afk._cleanup_stale_sessions()
+
+        # File should still exist (only dirs are cleaned)
+        assert stale_file.exists()
+
+    def test_activate_calls_cleanup(self):
+        """activate() calls _cleanup_stale_sessions."""
+        afk = _make_afk(active=False)
+
+        with patch.object(afk, '_cleanup_stale_sessions') as mock_cleanup:
+            afk.activate()
+
+        mock_cleanup.assert_called_once()

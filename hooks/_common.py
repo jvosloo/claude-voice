@@ -14,6 +14,11 @@ ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
 AFK_STOP_HOOK_TIMEOUT = 10800  # 3 hours — Stop hook blocks while user is AFK
 
+# How often hooks poll for response files (seconds).
+# Lower = less latency after Telegram reply, higher = less CPU.
+# 1s is a good balance: imperceptible delay for a human, negligible CPU.
+POLL_INTERVAL = 1
+
 _ERROR_LOG = os.path.expanduser("/tmp/claude-voice/logs/hook_errors.log")
 
 
@@ -98,7 +103,7 @@ def wait_for_response(response_path: str, timeout: float | None = None) -> str |
             except OSError:
                 pass  # Will be cleaned up later
             return response
-        time.sleep(1)
+        time.sleep(POLL_INTERVAL)
     return None
 
 

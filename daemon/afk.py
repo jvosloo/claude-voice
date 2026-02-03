@@ -1,7 +1,10 @@
 """AFK mode manager - bridges Claude Code sessions to Telegram."""
 
 import os
+import shutil
+import tempfile
 import threading
+import time
 
 from daemon.telegram import TelegramClient
 from daemon.request_queue import RequestQueue, QueuedRequest
@@ -14,6 +17,9 @@ RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
 
 # Telegram message limit (4096 max, reserve space for header/buttons/HTML)
 TELEGRAM_MAX_CHARS = 3900
+
+# Session dirs older than this are cleaned up on activate()
+STALE_SESSION_AGE = 3600  # 1 hour
 
 class AfkManager:
     """Manages AFK mode state and Telegram communication."""
@@ -84,6 +90,7 @@ class AfkManager:
         if not self._client:
             return False
         os.makedirs(RESPONSE_DIR, exist_ok=True)
+        self._cleanup_stale_sessions()
         self.active = True
         self._send("AFK mode active. Send /help for usage.")
         return True
@@ -681,24 +688,58 @@ class AfkManager:
         return os.path.join(session_dir, filename)
 
     def _write_response(self, response_path: str, response: str) -> None:
-        """Write a response for a hook to pick up."""
-        with open(response_path, "w") as f:
-            f.write(response)
+        """Write a response for a hook to pick up.
+
+        Uses write-then-rename for atomic handoff so the polling hook
+        never reads a partially-written file.
+        """
+        dir_path = os.path.dirname(response_path)
+        os.makedirs(dir_path, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, prefix=".resp_")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(response)
+            os.rename(tmp_path, response_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def cleanup_session(self, session: str) -> None:
         """Clean up response files for a session that has ended."""
         session_dir = os.path.join(RESPONSE_DIR, session)
         if os.path.exists(session_dir):
-            import shutil
             shutil.rmtree(session_dir, ignore_errors=True)
 
-        # Note: Queue cleanup would require additional methods
-        # For now, requests will remain in queue until timeout or completion
         with self._state_lock:
             self._session_contexts.pop(session, None)
             self._pending_followups.pop(session, None)
             if self._reply_target == session:
                 self._reply_target = None
+
+    def _cleanup_stale_sessions(self) -> None:
+        """Remove session directories older than STALE_SESSION_AGE.
+
+        Called on activate() to prevent accumulation of orphaned session
+        dirs from crashed hooks or daemon restarts.
+        """
+        try:
+            cutoff = time.time() - STALE_SESSION_AGE
+            for name in os.listdir(RESPONSE_DIR):
+                session_dir = os.path.join(RESPONSE_DIR, name)
+                if not os.path.isdir(session_dir):
+                    continue
+                try:
+                    mtime = os.path.getmtime(session_dir)
+                    if mtime < cutoff:
+                        shutil.rmtree(session_dir, ignore_errors=True)
+                        print(f"AFK: cleaned stale session dir [{name}]")
+                except OSError:
+                    pass
+        except FileNotFoundError:
+            pass
 
 
 def _escape_html(text: str) -> str:

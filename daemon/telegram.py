@@ -26,6 +26,7 @@ class TelegramClient:
         self._offset = 0  # For long-polling getUpdates
         self._polling = False
         self._poll_thread = None
+        self._poll_session = None  # requests.Session for polling (closed on stop)
         self._callback_handler = None  # Called with (callback_query_id, data, message_id)
         self._message_handler = None   # Called with (text,)
 
@@ -121,26 +122,37 @@ class TelegramClient:
         self._callback_handler = on_callback
         self._message_handler = on_message
         self._polling = True
+        self._poll_session = requests.Session()
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
 
     def stop_polling(self) -> None:
-        """Stop the polling loop."""
+        """Stop the polling loop.
+
+        Closes the poll session to interrupt any blocking HTTP request,
+        then waits for the poll thread to exit.
+        """
         self._polling = False
+        if self._poll_session:
+            self._poll_session.close()
         if self._poll_thread:
-            self._poll_thread.join(timeout=REQUEST_TIMEOUT_SHORT)
+            self._poll_thread.join(timeout=POLL_SOCKET_TIMEOUT + 1)
             self._poll_thread = None
+        self._poll_session = None
 
     def _poll_loop(self) -> None:
         """Long-polling loop for incoming updates.
 
         Retries indefinitely with exponential backoff on transient errors.
         Only stops when stop_polling() sets self._polling = False.
+        Uses self._poll_session which is closed by stop_polling() to
+        interrupt any blocking request for a clean shutdown.
         """
+        session = self._poll_session
         consecutive_errors = 0
         while self._polling:
             try:
-                resp = requests.get(
+                resp = session.get(
                     f"{self._base_url}/getUpdates",
                     params={"offset": self._offset, "timeout": POLL_TIMEOUT},
                     timeout=POLL_SOCKET_TIMEOUT,
@@ -161,6 +173,8 @@ class TelegramClient:
             except requests.exceptions.Timeout:
                 continue  # Normal for long-polling
             except Exception as e:
+                if not self._polling:
+                    break  # Session closed by stop_polling()
                 consecutive_errors += 1
                 if consecutive_errors % ERROR_LOG_INTERVAL == 1:
                     print(f"Telegram: polling error ({consecutive_errors} consecutive): {e}")
