@@ -9,7 +9,7 @@ import time
 from daemon.telegram import TelegramClient
 from daemon.request_queue import RequestQueue, QueuedRequest
 from daemon.request_router import QueueRouter
-from daemon.session_presenter import SingleChatPresenter
+from daemon.session_presenter import SingleChatPresenter, _escape_html
 
 # Response files directory
 RESPONSE_DIR = os.path.expanduser("/tmp/claude-voice/sessions")
@@ -191,6 +191,7 @@ class AfkManager:
             prompt=prompt,
             response_path=response_path,
             options=options,
+            context=self._session_contexts.get(session, None),
         )
 
         # Enqueue request
@@ -756,11 +757,6 @@ class AfkManager:
                     pass
         except FileNotFoundError:
             pass
-
-
-def _escape_html(text: str) -> str:
-    """Escape HTML special characters for Telegram HTML parse mode."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _markdown_to_telegram_html(text: str) -> str:

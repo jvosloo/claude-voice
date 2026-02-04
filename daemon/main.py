@@ -246,7 +246,11 @@ class VoiceDaemon:
                     model_name=new.input.cleanup_model,
                     debug=new.input.debug,
                 )
-                changed.append("cleaner(recreated)")
+                if not self.cleaner.ensure_ready():
+                    self.cleaner = None
+                    changed.append("cleaner(failed)")
+                else:
+                    changed.append("cleaner(recreated)")
         elif old.input.transcription_cleanup:
             self.cleaner = None
             changed.append("cleaner(disabled)")

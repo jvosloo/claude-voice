@@ -1,7 +1,7 @@
 """Tests for SessionPresenter."""
 
 from unittest.mock import Mock
-from daemon.session_presenter import SingleChatPresenter
+from daemon.session_presenter import SingleChatPresenter, _truncate_context
 from daemon.request_queue import QueuedRequest
 
 
@@ -239,3 +239,100 @@ class TestSingleChatPresenterQueueSummary:
         # Other buttons: Handle Now with session label
         assert "[sess-b]" in keyboard[1][0]['text']
         assert keyboard[1][0]['callback_data'] == "cmd:priority:sess-b"
+
+
+class TestContextInActiveRequest:
+
+    def test_permission_request_shows_context(self):
+        """Context appears between session name and permission line."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        req = QueuedRequest("sess", "permission", "Bash: cat /etc/hosts", "/tmp/r",
+                            context="I'll check the hosts file to verify DNS.")
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        text, _ = presenter.format_active_request(req, queue_info)
+
+        assert "check the hosts file" in text
+        assert "Permission: Bash: cat /etc/hosts" in text
+        # Context should appear before the permission line
+        ctx_pos = text.index("check the hosts file")
+        perm_pos = text.index("Permission:")
+        assert ctx_pos < perm_pos
+
+    def test_ask_user_question_shows_context(self):
+        """Context appears for ask_user_question requests too."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        req = QueuedRequest("sess", "ask_user_question", "Which DB?", "/tmp/r",
+                            context="Setting up the database layer.")
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        text, _ = presenter.format_active_request(req, queue_info)
+
+        assert "database layer" in text
+        assert "Which DB?" in text
+
+    def test_no_context_omits_block(self):
+        """When context is None, no extra lines are added."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        req = QueuedRequest("sess", "permission", "Bash: ls", "/tmp/r")
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        text, _ = presenter.format_active_request(req, queue_info)
+
+        # Should go directly from session to permission line
+        lines = [l for l in text.splitlines() if l.strip()]
+        session_idx = next(i for i, l in enumerate(lines) if "[sess]" in l)
+        perm_idx = next(i for i, l in enumerate(lines) if "Permission:" in l)
+        assert perm_idx == session_idx + 1
+
+    def test_context_html_escaped(self):
+        """HTML special chars in context are escaped."""
+        client = Mock()
+        presenter = SingleChatPresenter(client)
+        req = QueuedRequest("sess", "permission", "Bash: echo hi", "/tmp/r",
+                            context="Check if x < 5 && y > 3")
+        queue_info = {'emoji': '🟢', 'queue_size': 0}
+
+        text, _ = presenter.format_active_request(req, queue_info)
+
+        assert "&lt;" in text
+        assert "&amp;" in text
+        assert "&gt;" in text
+
+
+class TestTruncateContext:
+
+    def test_short_context_unchanged(self):
+        """Short context passes through unchanged."""
+        assert _truncate_context("hello") == "hello"
+
+    def test_multiline_keeps_last_five(self):
+        """Only last 5 lines are kept."""
+        lines = [f"line {i}" for i in range(10)]
+        result = _truncate_context("\n".join(lines))
+        assert "line 5" in result
+        assert "line 9" in result
+        assert "line 4" not in result
+        assert result.startswith("…\n")
+
+    def test_empty_context_returns_empty(self):
+        assert _truncate_context("") == ""
+        assert _truncate_context(None) == ""
+
+    def test_five_lines_no_ellipsis(self):
+        """Exactly 5 lines should not get a leading ellipsis."""
+        lines = [f"line {i}" for i in range(5)]
+        result = _truncate_context("\n".join(lines))
+        assert not result.startswith("…")
+        assert "line 0" in result
+        assert "line 4" in result
+
+    def test_long_context_char_capped(self):
+        """Context exceeding char limit is truncated."""
+        long_line = "x" * 700
+        result = _truncate_context(long_line)
+        assert len(result) <= 601  # 600 + leading "…"
+        assert result.startswith("…")

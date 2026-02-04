@@ -12,6 +12,31 @@ def _safe_callback_data(data: str) -> str:
     return encoded[:64].decode('utf-8', errors='ignore')
 
 
+def _escape_html(text: str) -> str:
+    """Escape HTML special characters for Telegram HTML parse mode."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+# Max lines of context to show above a permission prompt
+_CONTEXT_MAX_LINES = 5
+# Max characters of context (Telegram messages are 4096 max)
+_CONTEXT_MAX_CHARS = 600
+
+
+def _truncate_context(context: str) -> str:
+    """Extract the last few lines of context, truncated for Telegram."""
+    if not context:
+        return ""
+    lines = context.strip().splitlines()
+    tail = lines[-_CONTEXT_MAX_LINES:]
+    text = "\n".join(tail)
+    if len(lines) > _CONTEXT_MAX_LINES:
+        text = "…\n" + text
+    if len(text) > _CONTEXT_MAX_CHARS:
+        text = "…" + text[-_CONTEXT_MAX_CHARS:]
+    return text
+
+
 class SessionPresenter(ABC):
     """Formats and sends messages to Telegram. Swappable for Topics."""
 
@@ -43,6 +68,14 @@ class SingleChatPresenter(SessionPresenter):
             "",
             f"[{req.session}]",
         ]
+
+        # Add session context (last assistant message) if available
+        if req.context:
+            truncated = _truncate_context(req.context)
+            if truncated:
+                lines.append("")
+                lines.append(_escape_html(truncated))
+                lines.append("")
 
         # Add prompt based on type
         if req.req_type == "permission":

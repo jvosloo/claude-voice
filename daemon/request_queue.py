@@ -12,6 +12,7 @@ class QueuedRequest:
     prompt: str
     response_path: str
     options: list = None  # AskUserQuestion options: [{"label": "...", "description": "..."}]
+    context: str = None  # Last assistant message for session context
     message_id: int = None
     timestamp: float = None
 
