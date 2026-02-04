@@ -11,7 +11,7 @@ import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import SILENT_FLAG, send_to_daemon, read_mode, wait_for_response, AFK_STOP_HOOK_TIMEOUT, make_debug_logger, get_session
+from _common import SILENT_FLAG, send_to_daemon, read_mode, wait_for_response, AFK_RESPONSE_TIMEOUT, make_debug_logger, get_session
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/stop_hook.log"))
 
@@ -192,7 +192,7 @@ def main():
         return
 
     debug(f"AFK: blocking for follow-up at {response_path}")
-    answer = wait_for_response(response_path, timeout=AFK_STOP_HOOK_TIMEOUT)
+    answer = wait_for_response(response_path, timeout=AFK_RESPONSE_TIMEOUT)
 
     if not answer or answer in ("__back__", "__timeout__", "__flush__"):
         debug(f"AFK: unblocked with sentinel: {answer!r}")

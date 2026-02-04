@@ -11,8 +11,7 @@ TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
 MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
-AFK_RESPONSE_TIMEOUT = 600  # 10 minutes
-AFK_STOP_HOOK_TIMEOUT = 10800  # 3 hours — Stop hook blocks while user is AFK
+AFK_RESPONSE_TIMEOUT = 10800  # 3 hours — hooks block while user is AFK
 
 # How often hooks poll for response files (seconds).
 # Lower = less latency after Telegram reply, higher = less CPU.
