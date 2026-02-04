@@ -171,9 +171,21 @@ afk:
 |--------|--------|
 | Activate | Say "going AFK", press Left Alt+A, or send `/afk` in Telegram |
 | Deactivate | Say "back at keyboard", press Left Alt+A, or send `/back` or `/afk` in Telegram |
-| Check status | Send `/status` in Telegram |
 | Approve permission | Tap Yes / No button |
 | Provide input | Type your reply in the Telegram chat |
+
+**Telegram commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/afk` | Toggle AFK mode on/off |
+| `/back` | Deactivate AFK mode |
+| `/status` | Show active sessions and their state |
+| `/sessions` | List sessions with context — tap to see last message and reply |
+| `/queue` | Show pending requests |
+| `/skip` | Skip current request |
+| `/flush` | Clear all pending requests |
+| `/help` | Show available commands |
 
 **Security:**
 
@@ -398,9 +410,11 @@ claude-voice/                    # This repo (development)
 └── models/                      # Downloaded AI models
 
 ~/.claude/hooks/                 # Deployed hooks
-├── speak-response.py            # TTS hook
+├── speak-response.py            # TTS hook (AFK: blocks for follow-up)
 ├── permission-request.py        # AFK permission approval hook
-└── notify-permission.py         # Permission notification sound
+├── notify-permission.py         # Permission notification sound
+├── handle-ask-user.py           # Forwards AskUserQuestion to Telegram
+└── _common.py                   # Shared utilities for hooks
 ```
 
 ---
@@ -414,9 +428,11 @@ claude-voice/                    # This repo (development)
 - `~/.claude-voice/logs/` - Installation and daemon logs
 
 ### Voice Output (Hooks + Daemon)
-- `~/.claude/hooks/speak-response.py` - Stop hook: sends response text to daemon for TTS
+- `~/.claude/hooks/speak-response.py` - Stop hook: sends response text to daemon for TTS; in AFK mode, blocks for Telegram follow-up
 - `~/.claude/hooks/notify-permission.py` - Notification hook: plays "permission needed" audio cue
 - `~/.claude/hooks/permission-request.py` - PermissionRequest hook: routes permissions through Telegram in AFK mode, returns programmatic allow/deny decisions
+- `~/.claude/hooks/handle-ask-user.py` - PreToolUse hook: forwards AskUserQuestion prompts to Telegram in AFK mode
+- `~/.claude/hooks/_common.py` - Shared utilities: daemon communication, session keys, response polling
 - `~/.claude/settings.json` - Hook configuration (Stop, Notification, PermissionRequest, PreToolUse)
 - `~/.claude-voice/.tts.sock` - Unix socket for hook-to-daemon TTS communication (runtime)
 - Kokoro TTS model cached at `~/.cache/huggingface/hub/models--mlx-community--Kokoro-82M-bf16/`

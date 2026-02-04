@@ -63,7 +63,7 @@ Installed to `~/.claude/hooks/` by the installer. Hook-to-event mapping:
 | `permission-request.py` | PermissionRequest | Programmatic allow/deny in AFK; "ask" otherwise |
 | `notify-permission.py` | Notification (`permission_prompt`) | Audio cue; no-op in AFK |
 | `handle-ask-user.py` | PreToolUse (`AskUserQuestion`) | Forwards to Telegram in AFK |
-| `_common.py` | — | Shared paths, utilities, `wait_for_response()` |
+| `_common.py` | — | Shared paths, utilities, `get_session()`, `wait_for_response()` |
 
 ### Configuration
 
