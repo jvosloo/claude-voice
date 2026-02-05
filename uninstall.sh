@@ -45,7 +45,8 @@ DAEMON_STOPPED=false
 # Check PID file first (background mode)
 if [ -f "$INSTALL_DIR/daemon.pid" ]; then
     PID=$(cat "$INSTALL_DIR/daemon.pid")
-    if kill -0 "$PID" 2>/dev/null; then
+    # Validate PID is a positive integer before using
+    if [[ "$PID" =~ ^[0-9]+$ ]] && kill -0 "$PID" 2>/dev/null; then
         echo "Stopping running daemon (PID: $PID)..."
         kill "$PID" 2>/dev/null
         DAEMON_STOPPED=true
@@ -134,6 +135,8 @@ try:
     print("Removed Claude Voice hooks from settings.json")
 except Exception as e:
     print(f"Warning: Could not update settings.json: {e}")
+    print("  Manual cleanup may be needed: edit ~/.claude/settings.json")
+    print("  and remove any hooks with 'claude-voice' in the command path.")
 EOF
 fi
 
@@ -169,18 +172,28 @@ echo ""
 if [ "$KEEP_CONFIG" = true ]; then
     echo "Removing installation (keeping config.yaml and dev/)..."
     # Remove everything except config.yaml and dev/ (shared with settings app)
-    find "$INSTALL_DIR" -mindepth 1 \
+    # Use -depth to delete files before directories
+    find "$INSTALL_DIR" -mindepth 1 -depth \
         -not -name "config.yaml" \
         -not -name "dev" \
         -not -path "$INSTALL_DIR/dev/*" \
-        -delete 2>/dev/null
+        -delete 2>/dev/null || true
     # Remove directory if empty (will fail if config.yaml or dev/ remain)
     rmdir "$INSTALL_DIR" 2>/dev/null || true
 else
     echo "Removing installation directory..."
+    # Also preserve dev/ when deleting everything (settings app coordination)
+    if [ -d "$INSTALL_DIR/dev" ]; then
+        mv "$INSTALL_DIR/dev" "/tmp/claude-voice-dev-$$" 2>/dev/null || true
+    fi
     rm -f "$INSTALL_DIR/.tts.sock"
     rm -f "$INSTALL_DIR/.control.sock"
     rm -rf "$INSTALL_DIR"
+    # Restore dev/ if it existed
+    if [ -d "/tmp/claude-voice-dev-$$" ]; then
+        mkdir -p "$INSTALL_DIR"
+        mv "/tmp/claude-voice-dev-$$" "$INSTALL_DIR/dev"
+    fi
 fi
 
 # Remove temp files (session responses, debug logs, PID files)

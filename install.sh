@@ -104,7 +104,8 @@ if [ "$IS_UPDATE" = true ]; then
     # Check PID file first (background mode)
     if [ -f "$INSTALL_DIR/daemon.pid" ]; then
         PID=$(cat "$INSTALL_DIR/daemon.pid")
-        if kill -0 "$PID" 2>/dev/null; then
+        # Validate PID is a positive integer before using
+        if [[ "$PID" =~ ^[0-9]+$ ]] && kill -0 "$PID" 2>/dev/null; then
             echo "Stopping running daemon (PID: $PID)..."
             kill "$PID" 2>/dev/null || true
             DAEMON_STOPPED=true
@@ -152,10 +153,14 @@ chmod +x "$INSTALL_DIR/claude-voice-daemon"
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     echo "Creating default config..."
     cp "$SCRIPT_DIR/config.yaml.example" "$INSTALL_DIR/config.yaml"
+    # Set restrictive permissions (config may contain Telegram credentials)
+    chmod 600 "$INSTALL_DIR/config.yaml"
 else
     echo "Keeping existing config.yaml"
     # Always update the example file so users can see new options
     cp "$SCRIPT_DIR/config.yaml.example" "$INSTALL_DIR/config.yaml.example"
+    # Ensure existing config has restrictive permissions
+    chmod 600 "$INSTALL_DIR/config.yaml"
 fi
 
 # Find suitable Python (3.12+ required for mlx-audio dependencies)

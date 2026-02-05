@@ -51,4 +51,4 @@ Alternatively, since change #3 makes `handle-ask-user.py` send its own notificat
 
 - Unit test: verify `DEFAULT_NOTIFY_PHRASES` contains all three categories
 - Unit test: `handle-ask-user.py` in notify mode sends `notify_category: "question"` and sets `ASK_USER_FLAG`
-- Manual: trigger AskUserQuestion in notify mode, confirm "I have a question for you" plays (not "Permission needed")
+- Manual: trigger AskUserQuestion in notify mode, confirm "Please choose an option" plays (not "Permission needed")

@@ -13,6 +13,7 @@ In non-AFK mode, returns nothing (tool runs normally with local picker).
 import json
 import os
 import sys
+import tempfile
 import time
 
 # Allow importing _common from the same directory
@@ -56,11 +57,14 @@ def main():
 
         # Set flag so notify-permission.py skips "permission needed"
         try:
-            os.makedirs(os.path.dirname(ASK_USER_FLAG), exist_ok=True)
-            with open(ASK_USER_FLAG, "w") as f:
-                f.write(str(time.time()))
-        except Exception:
-            pass
+            flag_dir = os.path.dirname(ASK_USER_FLAG)
+            os.makedirs(flag_dir, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(dir=flag_dir, prefix=".flag_")
+            os.write(fd, str(time.time()).encode())
+            os.close(fd)
+            os.rename(tmp_path, ASK_USER_FLAG)
+        except Exception as e:
+            debug(f"Failed to write ASK_USER_FLAG: {e}")
 
         resp = send_to_daemon({
             "notify_category": "question",
@@ -119,11 +123,14 @@ def main():
 
     # Set flag so notify-permission.py skips the duplicate notification
     try:
-        os.makedirs(os.path.dirname(ASK_USER_FLAG), exist_ok=True)
-        with open(ASK_USER_FLAG, "w") as f:
-            f.write(str(time.time()))
-    except Exception:
-        pass
+        flag_dir = os.path.dirname(ASK_USER_FLAG)
+        os.makedirs(flag_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=flag_dir, prefix=".flag_")
+        os.write(fd, str(time.time()).encode())
+        os.close(fd)
+        os.rename(tmp_path, ASK_USER_FLAG)
+    except Exception as e:
+        debug(f"Failed to write ASK_USER_FLAG: {e}")
 
     # Block until Telegram response arrives
     debug(f"Waiting for response at {response_path}")

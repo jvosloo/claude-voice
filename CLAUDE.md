@@ -60,9 +60,9 @@ Installed to `~/.claude/hooks/` by the installer. Hook-to-event mapping:
 | Script | Claude Code Event | Role |
 |--------|------------------|------|
 | `speak-response.py` | Stop | TTS; in AFK mode, blocks for Telegram follow-up |
-| `permission-request.py` | PermissionRequest | Programmatic allow/deny in AFK; "ask" otherwise |
+| `permission-request.py` | PermissionRequest | Checks stored rules; programmatic allow/deny in AFK; "ask" otherwise |
 | `notify-permission.py` | Notification (`permission_prompt`) | Audio cue; no-op in AFK |
-| `handle-ask-user.py` | PreToolUse (`AskUserQuestion`) | "Question" phrase in notify; forwards to Telegram in AFK |
+| `handle-ask-user.py` | PreToolUse (`AskUserQuestion`) | Plays "question" phrase + sets flag in notify; forwards to Telegram in AFK |
 | `_common.py` | — | Shared paths, utilities, `get_session()`, `wait_for_response()` |
 
 ### Configuration
@@ -85,6 +85,8 @@ Temporary state (in `/tmp/claude-voice/`):
 - `permission_hook.log` — permission hook debug trace
 - `permission_hook_input.json` — last raw hook input JSON
 - `stop_hook.log` — Stop hook debug trace (AFK blocking, follow-up delivery)
+- `ask-user-debug.log` — AskUserQuestion hook debug trace
+- `hook_errors.log` — general hook error log (all hooks)
 
 ## Testing Conventions
 
@@ -113,7 +115,7 @@ Commands sent as JSON over `~/.claude-voice/.control.sock`:
 
 | Command         | JSON                                      | Response                                                      |
 |-----------------|-------------------------------------------|---------------------------------------------------------------|
-| status          | `{"cmd": "status"}`                       | `{"mode": "notify", "voice": true}`                           |
+| status          | `{"cmd": "status"}`                       | `{"daemon": true, "mode": "notify", "voice": true, "recording": false, "ready": true}` |
 | set_mode        | `{"cmd": "set_mode", "mode": "notify"}`   | `{"ok": true}`                                                |
 | voice_on        | `{"cmd": "voice_on"}`                     | `{"ok": true}`                                                |
 | voice_off       | `{"cmd": "voice_off"}`                    | `{"ok": true}`                                                |
@@ -122,6 +124,8 @@ Commands sent as JSON over `~/.claude-voice/.control.sock`:
 | preview_overlay | `{"cmd": "preview_overlay"}`              | `{"ok": true}` — shows recording 1.5s, transcribing 1s, hide |
 | stop            | `{"cmd": "stop"}`                         | `{"ok": true}` — graceful shutdown                            |
 | subscribe       | `{"cmd": "subscribe"}`                    | streams newline-delimited JSON events                         |
+
+Status response fields: `daemon` (always true), `mode` (notify/narrate/afk), `voice` (output enabled), `recording` (mic active), `ready` (fully initialized).
 
 ## Deployment
 
