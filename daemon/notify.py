@@ -7,6 +7,7 @@ import threading
 # Categories
 PERMISSION = "permission"
 DONE = "done"
+QUESTION = "question"
 
 
 def classify(text: str) -> str:

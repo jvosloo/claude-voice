@@ -11,6 +11,7 @@ handled programmatically by permission-request.py (PermissionRequest hook).
 import json
 import os
 import sys
+import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
@@ -35,9 +36,14 @@ def main():
     if os.path.exists(SILENT_FLAG):
         return
 
-    # Skip if AskUserQuestion hook is handling this prompt
-    if os.path.exists(ASK_USER_FLAG):
-        return
+    # Skip if AskUserQuestion hook recently set the flag (within 5s).
+    # The flag persists on disk; checking age avoids stale flags from
+    # blocking future legitimate "permission needed" phrases.
+    try:
+        if time.time() - os.path.getmtime(ASK_USER_FLAG) < 5:
+            return
+    except OSError:
+        pass
 
     # Read hook input
     try:

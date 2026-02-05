@@ -1,6 +1,7 @@
 """Main daemon for Claude Voice - ties all components together."""
 
 import os
+import stat
 import sys
 
 # Ensure print output is unbuffered (visible in log files when running in background)
@@ -62,10 +63,10 @@ def _read_mode() -> str:
         try:
             with open(MODE_FILE) as f:
                 mode = f.read().strip()
-            if mode in ("narrate", "notify"):
+            if mode in ("narrate", "notify", "afk"):
                 return mode
-        except Exception:
-            pass
+        except OSError:
+            pass  # File read error, use default
     return "notify"
 
 
@@ -146,6 +147,7 @@ class VoiceDaemon:
         self._tts_server = None
         self._shutting_down = False
         self._interrupted_tts = False
+        self._ready = False  # Set True when fully initialized
         self.afk = AfkManager(self.config)
 
         # Optional transcription cleanup via LLM
@@ -166,6 +168,9 @@ class VoiceDaemon:
 
     def get_voice_enabled(self) -> bool:
         return not os.path.exists(SILENT_FLAG)
+
+    def is_ready(self) -> bool:
+        return self._ready
 
     def set_voice_enabled(self, enabled: bool) -> None:
         if enabled:
@@ -423,6 +428,7 @@ class VoiceDaemon:
 
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(TTS_SOCK_PATH)
+        os.chmod(TTS_SOCK_PATH, stat.S_IRUSR | stat.S_IWUSR)  # 0o600 - owner only
         server.listen(5)
         server.settimeout(1.0)  # Allow periodic shutdown checks
 
@@ -433,7 +439,9 @@ class VoiceDaemon:
                 conn, _ = server.accept()
             except socket.timeout:
                 continue
-            except OSError:
+            except OSError as e:
+                if not self._shutting_down:
+                    print(f"TTS server: accept error, exiting: {e}")
                 break
 
             conn_closed = False
@@ -494,8 +502,8 @@ class VoiceDaemon:
                 if not conn_closed:
                     try:
                         conn.close()
-                    except Exception:
-                        pass
+                    except OSError:
+                        pass  # Connection already closed
 
         server.close()
         if os.path.exists(TTS_SOCK_PATH):
@@ -568,8 +576,8 @@ class VoiceDaemon:
                 try:
                     _cue_stream.stop()
                     _cue_stream.close()
-                except Exception:
-                    pass
+                except (sd.PortAudioError, OSError):
+                    pass  # Device already closed or unavailable
                 _cue_stream = None
 
         # Hide overlay
@@ -582,8 +590,8 @@ class VoiceDaemon:
         if self._tts_server:
             try:
                 self._tts_server.close()
-            except Exception:
-                pass
+            except OSError:
+                pass  # Socket already closed
         if os.path.exists(TTS_SOCK_PATH):
             os.unlink(TTS_SOCK_PATH)
         self.hotkey_listener.stop()
@@ -598,8 +606,8 @@ class VoiceDaemon:
             tracker = resource_tracker._resource_tracker
             if tracker._pid is not None:
                 os.kill(tracker._pid, signal.SIGKILL)
-        except:
-            pass
+        except (ProcessLookupError, OSError, AttributeError, ImportError):
+            pass  # Process already dead, or tracker internals changed
 
         # Exit immediately without Python's cleanup
         os._exit(0)
@@ -715,13 +723,13 @@ class VoiceDaemon:
             print()
 
             # Start TTS socket server
-            tts_thread = threading.Thread(target=self._run_tts_server, daemon=True)
+            tts_thread = threading.Thread(target=self._run_tts_server, daemon=True, name="tts-server")
             tts_thread.start()
             print(f"TTS server listening on {TTS_SOCK_PATH}")
 
             # Start control socket server (for external app communication)
             self.control_server = ControlServer(self)
-            control_thread = threading.Thread(target=self.control_server.run, daemon=True)
+            control_thread = threading.Thread(target=self.control_server.run, daemon=True, name="control-server")
             control_thread.start()
             print("Control server listening on ~/.claude-voice/.control.sock")
 
@@ -741,6 +749,7 @@ class VoiceDaemon:
             _play_cue(CUE_ASCENDING)
             if overlay_cfg.enabled:
                 overlay.show_flash("Claude Voice Started")
+            self._ready = True
 
         if overlay_cfg.enabled:
             # Run startup in background so Cocoa run loop can drive overlay animations

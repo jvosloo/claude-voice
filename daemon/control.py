@@ -13,6 +13,13 @@ Commands (client → daemon):
     {"cmd": "stop"}                      → shutdown daemon
     {"cmd": "subscribe"}                 → keep connection open for events
 
+Status response fields:
+    daemon      bool    always True
+    mode        str     "notify", "narrate", or "afk"
+    voice       bool    True if voice output enabled
+    recording   bool    True if currently recording
+    ready       bool    True when fully initialized (models loaded, hotkey active)
+
 Events (daemon → subscribed clients):
     {"event": "mode_changed", "mode": "..."}
     {"event": "voice_changed", "enabled": true/false}
@@ -24,6 +31,7 @@ Events (daemon → subscribed clients):
 import json
 import os
 import socket
+import stat
 import threading
 
 CONTROL_SOCK_PATH = os.path.expanduser("~/.claude-voice/.control.sock")
@@ -48,9 +56,8 @@ class ControlServer:
                 "daemon": True,
                 "mode": self.daemon.get_mode(),
                 "voice": self.daemon.get_voice_enabled(),
-                "recording": self.daemon.recorder.is_recording
-                if hasattr(self.daemon.recorder, "is_recording")
-                else False,
+                "recording": self.daemon.recorder.is_recording,
+                "ready": self.daemon.is_ready(),
             }
 
         if cmd == "set_mode":
@@ -126,6 +133,7 @@ class ControlServer:
 
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(CONTROL_SOCK_PATH)
+        os.chmod(CONTROL_SOCK_PATH, stat.S_IRUSR | stat.S_IWUSR)  # 0o600 - owner only
         server.listen(5)
         server.settimeout(1.0)
         self._server = server
@@ -177,11 +185,17 @@ class ControlServer:
 
             conn.sendall(json.dumps(response).encode())
             conn.close()
-        except Exception as e:
-            print(f"Control server error: {e}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            print(f"Control server: malformed request: {e}")
             try:
                 conn.close()
-            except Exception:
+            except OSError:
+                pass
+        except OSError as e:
+            # Connection errors (client disconnected, etc.)
+            try:
+                conn.close()
+            except OSError:
                 pass
 
     def shutdown(self):
@@ -190,12 +204,12 @@ class ControlServer:
         if self._server:
             try:
                 self._server.close()
-            except Exception:
-                pass
+            except OSError:
+                pass  # Socket already closed
         with self._lock:
             for conn in self._event_connections:
                 try:
                     conn.close()
-                except Exception:
-                    pass
+                except OSError:
+                    pass  # Connection already closed
             self._event_connections.clear()

@@ -74,8 +74,8 @@ class TelegramClient:
                 json={"callback_query_id": callback_query_id, "text": text},
                 timeout=REQUEST_TIMEOUT_SHORT,
             )
-        except Exception:
-            pass
+        except requests.RequestException:
+            pass  # Non-critical - button just won't show "acknowledged"
 
     def edit_message_text(self, message_id: int, text: str,
                           reply_markup: dict | None = None) -> bool:
@@ -95,7 +95,7 @@ class TelegramClient:
                 timeout=REQUEST_TIMEOUT_SHORT,
             )
             return resp.json().get("ok", False)
-        except Exception:
+        except (requests.RequestException, json.JSONDecodeError):
             return False
 
     def edit_message_reply_markup(self, message_id: int, reply_markup: dict | None = None) -> None:
@@ -114,8 +114,8 @@ class TelegramClient:
                 json=payload,
                 timeout=REQUEST_TIMEOUT_SHORT,
             )
-        except Exception:
-            pass
+        except requests.RequestException:
+            pass  # Non-critical - buttons may remain visible
 
     def start_polling(self, on_callback=None, on_message=None) -> None:
         """Start long-polling for updates in a background thread."""

@@ -10,6 +10,7 @@ def _make_server():
     daemon = MagicMock()
     daemon.get_mode.return_value = "notify"
     daemon.get_voice_enabled.return_value = True
+    daemon.is_ready.return_value = True
     daemon.recorder.is_recording = False
     server = ControlServer(daemon)
     return server, daemon
@@ -24,6 +25,13 @@ class TestHandleCommand:
         assert resp["mode"] == "notify"
         assert resp["voice"] is True
         assert resp["recording"] is False
+        assert resp["ready"] is True
+
+    def test_status_not_ready(self):
+        server, daemon = _make_server()
+        daemon.is_ready.return_value = False
+        resp = server._handle_command({"cmd": "status"})
+        assert resp["ready"] is False
 
     def test_set_mode(self):
         server, daemon = _make_server()

@@ -31,11 +31,11 @@ def _make_hook_input(questions=None):
     return {"tool_input": {"questions": questions}}
 
 
-class TestNonAfkPassthrough:
+class TestPassthroughModes:
 
-    def test_non_afk_mode_returns_nothing(self, capsys):
-        """In non-AFK mode, hook outputs nothing (allows tool to run normally)."""
-        with patch("handle_ask_user.read_mode", return_value="notify"):
+    def test_narrate_mode_returns_nothing(self, capsys):
+        """In narrate mode, hook outputs nothing (allows tool to run normally)."""
+        with patch("handle_ask_user.read_mode", return_value="narrate"):
             main()
 
         captured = capsys.readouterr()
@@ -46,6 +46,69 @@ class TestNonAfkPassthrough:
         with patch("handle_ask_user.read_mode", return_value=""):
             main()
 
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+
+class TestNotifyModeQuestion:
+
+    def test_sends_question_notification(self, capsys):
+        """In notify mode, hook sends notify_category='question' to daemon."""
+        hook_input = _make_hook_input()
+
+        with patch("handle_ask_user.read_mode", return_value="notify"), \
+             patch("sys.stdin", new=MagicMock(read=lambda: json.dumps(hook_input))), \
+             patch("json.load", return_value=hook_input), \
+             patch("handle_ask_user.send_to_daemon") as mock_send, \
+             patch("handle_ask_user.get_session", return_value="test_session"):
+            main()
+
+        mock_send.assert_called_once()
+        sent = mock_send.call_args[0][0]
+        assert sent["notify_category"] == "question"
+        assert sent["session"] == "test_session"
+
+        # No decision printed — tool runs normally with local picker
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_sets_ask_user_flag(self, tmp_path):
+        """In notify mode, hook sets ASK_USER_FLAG so permission hook skips."""
+        flag_path = str(tmp_path / ".ask_user_active")
+        hook_input = _make_hook_input()
+
+        with patch("handle_ask_user.read_mode", return_value="notify"), \
+             patch("sys.stdin", new=MagicMock(read=lambda: json.dumps(hook_input))), \
+             patch("json.load", return_value=hook_input), \
+             patch("handle_ask_user.send_to_daemon"), \
+             patch("handle_ask_user.get_session", return_value="test_session"), \
+             patch("handle_ask_user.ASK_USER_FLAG", flag_path):
+            main()
+
+        assert os.path.exists(flag_path)
+
+    def test_bad_stdin_exits_gracefully(self, capsys):
+        """In notify mode, if stdin is bad JSON, exits without sending."""
+        with patch("handle_ask_user.read_mode", return_value="notify"), \
+             patch("json.load", side_effect=json.JSONDecodeError("", "", 0)), \
+             patch("handle_ask_user.send_to_daemon") as mock_send:
+            main()
+
+        mock_send.assert_not_called()
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+    def test_no_questions_exits_gracefully(self, capsys):
+        """In notify mode, if no questions in input, exits without sending."""
+        hook_input = {"tool_input": {}}
+
+        with patch("handle_ask_user.read_mode", return_value="notify"), \
+             patch("sys.stdin", new=MagicMock(read=lambda: json.dumps(hook_input))), \
+             patch("json.load", return_value=hook_input), \
+             patch("handle_ask_user.send_to_daemon") as mock_send:
+            main()
+
+        mock_send.assert_not_called()
         captured = capsys.readouterr()
         assert captured.out == ""
 

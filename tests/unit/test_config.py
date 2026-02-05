@@ -3,6 +3,7 @@
 from daemon.config import (
     AfkConfig, AfkTelegramConfig, Config, InputConfig, TranscriptionConfig,
     SpeechConfig, AudioConfig, OverlayConfig, load_config,
+    DEFAULT_NOTIFY_PHRASES,
 )
 from unittest.mock import patch, mock_open
 
@@ -91,3 +92,17 @@ input:
         assert cfg.input.auto_submit is True
         assert cfg.input.hotkey == "right_alt"  # default
         assert cfg.speech.mode == "notify"  # default
+
+
+def test_default_notify_phrases_has_all_categories():
+    assert "done" in DEFAULT_NOTIFY_PHRASES
+    assert "permission" in DEFAULT_NOTIFY_PHRASES
+    assert "question" in DEFAULT_NOTIFY_PHRASES
+
+
+def test_done_phrase_text():
+    assert DEFAULT_NOTIFY_PHRASES["done"] == "Over to you"
+
+
+def test_question_phrase_text():
+    assert DEFAULT_NOTIFY_PHRASES["question"] == "Please choose an option"

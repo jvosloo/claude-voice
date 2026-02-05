@@ -3,6 +3,7 @@
 import json
 import os
 import socket
+import stat
 import sys
 import time
 
@@ -25,7 +26,13 @@ def log_error(hook: str, error: Exception) -> None:
     """Log hook errors to debug file and stderr."""
     msg = f"[{hook}] {type(error).__name__}: {error}"
     try:
-        os.makedirs(os.path.dirname(_ERROR_LOG), exist_ok=True)
+        log_dir = os.path.dirname(_ERROR_LOG)
+        os.makedirs(log_dir, mode=0o700, exist_ok=True)
+        # Ensure directory permissions are restrictive
+        try:
+            os.chmod(log_dir, stat.S_IRWXU)  # 0o700
+        except PermissionError:
+            pass
         with open(_ERROR_LOG, "a") as f:
             f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
     except OSError:
@@ -37,7 +44,12 @@ def make_debug_logger(log_path: str):
     """Create a debug logging function that writes to the given log file."""
     def debug(msg: str) -> None:
         try:
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            log_dir = os.path.dirname(log_path)
+            os.makedirs(log_dir, mode=0o700, exist_ok=True)
+            try:
+                os.chmod(log_dir, stat.S_IRWXU)  # 0o700
+            except PermissionError:
+                pass
             with open(log_path, "a") as f:
                 f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
         except OSError:
@@ -167,10 +179,17 @@ def store_permission_rule(pattern: str) -> None:
         "added": time.time(),
     })
 
-    # Save
+    # Save with restrictive permissions (contains permission patterns)
     try:
-        os.makedirs(os.path.dirname(PERMISSION_RULES_FILE), exist_ok=True)
-        with open(PERMISSION_RULES_FILE, "w") as f:
+        dir_path = os.path.dirname(PERMISSION_RULES_FILE)
+        os.makedirs(dir_path, mode=0o700, exist_ok=True)
+        # Use os.open to create file with restrictive permissions
+        fd = os.open(
+            PERMISSION_RULES_FILE,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            stat.S_IRUSR | stat.S_IWUSR,  # 0o600
+        )
+        with os.fdopen(fd, "w") as f:
             json.dump(rules, f, indent=2)
     except OSError as e:
         print(f"Warning: could not save permission rule: {e}", file=sys.stderr)

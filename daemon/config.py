@@ -29,7 +29,8 @@ class TranscriptionConfig:
 
 DEFAULT_NOTIFY_PHRASES = {
     "permission": "Permission needed",
-    "done": "Ready for input",
+    "done": "Over to you",
+    "question": "Please choose an option",
 }
 
 # Translated notify phrases per Kokoro lang_code.

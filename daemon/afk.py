@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import stat
 import tempfile
 import threading
 import time
@@ -678,7 +679,12 @@ class AfkManager:
     def _response_path(self, session: str, suffix: str = "") -> str:
         """Get the response file path for a session."""
         session_dir = os.path.join(RESPONSE_DIR, session)
-        os.makedirs(session_dir, exist_ok=True)
+        os.makedirs(session_dir, mode=0o700, exist_ok=True)
+        # Ensure permissions even if directory already existed
+        try:
+            os.chmod(session_dir, stat.S_IRWXU)  # 0o700 - owner only
+        except PermissionError:
+            pass  # Can't chmod if we don't own the directory
         filename = f"response_{suffix}" if suffix else "response"
         return os.path.join(session_dir, filename)
 
@@ -689,8 +695,14 @@ class AfkManager:
         never reads a partially-written file.
         """
         dir_path = os.path.dirname(response_path)
-        os.makedirs(dir_path, exist_ok=True)
+        os.makedirs(dir_path, mode=0o700, exist_ok=True)
+        # Set restrictive permissions on session directory (ignore if system dir)
+        try:
+            os.chmod(dir_path, stat.S_IRWXU)  # 0o700 - owner only
+        except PermissionError:
+            pass  # Can't chmod system directories like /tmp
         fd, tmp_path = tempfile.mkstemp(dir=dir_path, prefix=".resp_")
+        os.fchmod(fd, stat.S_IRUSR | stat.S_IWUSR)  # 0o600 - owner only
         try:
             with os.fdopen(fd, "w") as f:
                 f.write(response)

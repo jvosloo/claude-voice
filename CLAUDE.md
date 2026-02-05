@@ -62,7 +62,7 @@ Installed to `~/.claude/hooks/` by the installer. Hook-to-event mapping:
 | `speak-response.py` | Stop | TTS; in AFK mode, blocks for Telegram follow-up |
 | `permission-request.py` | PermissionRequest | Programmatic allow/deny in AFK; "ask" otherwise |
 | `notify-permission.py` | Notification (`permission_prompt`) | Audio cue; no-op in AFK |
-| `handle-ask-user.py` | PreToolUse (`AskUserQuestion`) | Forwards to Telegram in AFK |
+| `handle-ask-user.py` | PreToolUse (`AskUserQuestion`) | "Question" phrase in notify; forwards to Telegram in AFK |
 | `_common.py` | — | Shared paths, utilities, `get_session()`, `wait_for_response()` |
 
 ### Configuration
@@ -77,7 +77,7 @@ YAML at `~/.claude-voice/config.yaml` (see `config.yaml.example`). Hot-reloads w
 - `permission_rules.json` — stored "always allow" rules from AFK mode
 
 Temporary state (in `/tmp/claude-voice/`):
-- `.ask_user_active` — flag for AFK user input in progress
+- `.ask_user_active` — flag for AskUserQuestion in progress (suppresses "permission needed" phrase in notify/AFK)
 - `sessions/<session>/response_stop` — response file for Stop hook blocking
 
 ### Debug Logs (in `/tmp/claude-voice/logs/`)
@@ -118,7 +118,7 @@ Commands sent as JSON over `~/.claude-voice/.control.sock`:
 | voice_on        | `{"cmd": "voice_on"}`                     | `{"ok": true}`                                                |
 | voice_off       | `{"cmd": "voice_off"}`                    | `{"ok": true}`                                                |
 | reload_config   | `{"cmd": "reload_config"}`                | `{"ok": true}`                                                |
-| speak           | `{"cmd": "speak"}`                        | `{"ok": true}` — plays "Ready for input" phrase               |
+| speak           | `{"cmd": "speak"}`                        | `{"ok": true}` — plays "Over to you" phrase                   |
 | preview_overlay | `{"cmd": "preview_overlay"}`              | `{"ok": true}` — shows recording 1.5s, transcribing 1s, hide |
 | stop            | `{"cmd": "stop"}`                         | `{"ok": true}` — graceful shutdown                            |
 | subscribe       | `{"cmd": "subscribe"}`                    | streams newline-delimited JSON events                         |

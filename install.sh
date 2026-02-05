@@ -217,7 +217,9 @@ else
     _spin_run "Installing Python dependencies" pip install --upgrade pip -q
 fi
 _spin_run "Installing core dependencies" pip install --upgrade --only-binary av pynput sounddevice pyyaml mlx-audio "misaki<0.8" num2words phonemizer spacy espeakng-loader pyobjc-framework-Cocoa pyobjc-framework-Quartz -q
-_spin_run "Downloading spacy English model" python3 -m spacy download en_core_web_sm --no-cache-dir -q
+if ! python3 -c "import en_core_web_sm" 2>/dev/null; then
+    _spin_run "Downloading spacy English model" python3 -m spacy download en_core_web_sm -q
+fi
 
 # Migrate Piper TTS config to Kokoro (must run after venv + deps are installed)
 if grep -q 'piper\|en_GB-\|en_US-' "$INSTALL_DIR/config.yaml" 2>/dev/null; then

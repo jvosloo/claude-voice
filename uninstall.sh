@@ -72,14 +72,13 @@ if [ "$DAEMON_STOPPED" = true ]; then
 fi
 
 # Remove Claude Code hooks
-if [ -f "$CLAUDE_HOOKS_DIR/speak-response.py" ]; then
-    echo "Removing Claude Code hooks..."
-    rm -f "$CLAUDE_HOOKS_DIR/speak-response.py"
-fi
-rm -f "$CLAUDE_HOOKS_DIR/notify-permission.py"
-rm -f "$CLAUDE_HOOKS_DIR/permission-request.py"
-rm -f "$CLAUDE_HOOKS_DIR/handle-ask-user.py"
-rm -f "$CLAUDE_HOOKS_DIR/_common.py"
+echo "Removing Claude Code hook scripts..."
+for hook in speak-response.py notify-permission.py permission-request.py handle-ask-user.py _common.py; do
+    if [ -f "$CLAUDE_HOOKS_DIR/$hook" ]; then
+        rm -f "$CLAUDE_HOOKS_DIR/$hook"
+        echo "  Removed $hook"
+    fi
+done
 
 # Remove hooks from settings.json (only claude-voice entries, preserve others)
 if [ -f "$CLAUDE_SETTINGS" ] && grep -q 'claude/hooks/' "$CLAUDE_SETTINGS"; then

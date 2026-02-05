@@ -48,8 +48,8 @@ class AudioRecorder:
         if self._stream is not None:
             try:
                 self._stream.close()
-            except Exception:
-                pass
+            except sd.PortAudioError:
+                pass  # Device already closed or unavailable
             self._stream = None
 
         for attempt in range(2):
@@ -69,6 +69,11 @@ class AudioRecorder:
                     time.sleep(0.1)
                 else:
                     raise
+
+    @property
+    def is_recording(self) -> bool:
+        """Return True if currently recording."""
+        return self._recording
 
     def start(self) -> None:
         """Start recording audio."""
@@ -94,8 +99,8 @@ class AudioRecorder:
             try:
                 self._stream.stop()
                 self._stream.close()
-            except Exception:
-                pass
+            except sd.PortAudioError:
+                pass  # Device already closed or unavailable
             self._stream = None
 
         return result
@@ -107,8 +112,8 @@ class AudioRecorder:
             try:
                 self._stream.stop()
                 self._stream.close()
-            except Exception:
-                pass
+            except sd.PortAudioError:
+                pass  # Device already closed or unavailable
             self._stream = None
 
     def get_duration(self, audio: np.ndarray) -> float:

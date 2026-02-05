@@ -139,6 +139,7 @@ Cleaned:'''
             return cleaned
 
         except subprocess.TimeoutExpired:
-            return text
-        except Exception:
-            return text
+            return text  # LLM took too long, use original
+        except (subprocess.SubprocessError, OSError) as e:
+            print(f"Cleanup error: {e}")
+            return text  # Subprocess failed, use original

@@ -35,8 +35,42 @@ def _deny(reason: str) -> None:
 
 
 def main():
-    # Only active in AFK mode
     mode = read_mode()
+
+    # Notify mode: play "question" phrase, set flag, return
+    if mode == "notify":
+        debug(f"Hook fired in notify mode")
+        try:
+            hook_input = json.load(sys.stdin)
+        except json.JSONDecodeError:
+            debug("Failed to parse hook input in notify mode")
+            return
+
+        tool_input = hook_input.get("tool_input", {})
+        if not tool_input.get("questions"):
+            debug("No questions in notify mode input")
+            return
+
+        session = get_session(hook_input)
+        debug(f"Notify mode: session={session}, sending question notification")
+
+        # Set flag so notify-permission.py skips "permission needed"
+        try:
+            os.makedirs(os.path.dirname(ASK_USER_FLAG), exist_ok=True)
+            with open(ASK_USER_FLAG, "w") as f:
+                f.write(str(time.time()))
+        except Exception:
+            pass
+
+        resp = send_to_daemon({
+            "notify_category": "question",
+            "session": session,
+            "type": "ask_user_question",
+        })
+        debug(f"Notify mode: daemon response={resp}")
+        return
+
+    # Only active in AFK mode
     if mode != "afk":
         return
 

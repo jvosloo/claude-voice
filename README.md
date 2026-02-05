@@ -3,7 +3,7 @@
 Push-to-talk voice input for macOS. Transcribes speech and types it into any focused application.
 
 When used with Claude Code, two voice output modes are available:
-- **Notify mode** (default) — plays short status phrases ("Ready for input", "Permission needed")
+- **Notify mode** (default) — plays short status phrases ("Over to you", "Permission needed", "Please choose an option")
 - **Narrate mode** — reads Claude's full response aloud via neural TTS
 
 **Platform:** macOS (uses `afplay` for audio playback)
@@ -239,7 +239,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `max_chars` | `null` | Limit spoken output length (`null` = unlimited) |
 | `skip_code_blocks` | `true` | Don't speak code blocks |
 | `skip_tool_results` | `true` | Don't speak tool result output |
-| `notify_phrases` | *(defaults)* | Custom phrase overrides per category (permission, done) |
+| `notify_phrases` | *(defaults)* | Custom phrase overrides per category (done, permission, question) |
 | `hotkey` | `left_alt+v` | Combo hotkey to toggle voice on/off (`null` to disable) |
 
 ### Transcription Settings
@@ -413,7 +413,7 @@ claude-voice/                    # This repo (development)
 ├── speak-response.py            # TTS hook (AFK: blocks for follow-up)
 ├── permission-request.py        # AFK permission approval hook
 ├── notify-permission.py         # Permission notification sound
-├── handle-ask-user.py           # Forwards AskUserQuestion to Telegram
+├── handle-ask-user.py           # Question phrase in notify; AskUserQuestion to Telegram in AFK
 └── _common.py                   # Shared utilities for hooks
 ```
 
@@ -431,7 +431,7 @@ claude-voice/                    # This repo (development)
 - `~/.claude/hooks/speak-response.py` - Stop hook: sends response text to daemon for TTS; in AFK mode, blocks for Telegram follow-up
 - `~/.claude/hooks/notify-permission.py` - Notification hook: plays "permission needed" audio cue
 - `~/.claude/hooks/permission-request.py` - PermissionRequest hook: routes permissions through Telegram in AFK mode, returns programmatic allow/deny decisions
-- `~/.claude/hooks/handle-ask-user.py` - PreToolUse hook: forwards AskUserQuestion prompts to Telegram in AFK mode
+- `~/.claude/hooks/handle-ask-user.py` - PreToolUse hook: plays "question" phrase in notify mode; forwards to Telegram in AFK mode
 - `~/.claude/hooks/_common.py` - Shared utilities: daemon communication, session keys, response polling
 - `~/.claude/settings.json` - Hook configuration (Stop, Notification, PermissionRequest, PreToolUse)
 - `~/.claude-voice/.tts.sock` - Unix socket for hook-to-daemon TTS communication (runtime)

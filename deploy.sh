@@ -58,6 +58,16 @@ for file in "$REPO_DIR/daemon"/*.py; do
     fi
 done
 
+# Deploy notify phrase wav files
+mkdir -p "$INSTALL_DIR/daemon/notify_phrases"
+for file in "$REPO_DIR/daemon/notify_phrases"/*.wav; do
+    if [ -f "$file" ]; then
+        if copy_if_changed "$file" "$INSTALL_DIR/daemon/notify_phrases/$(basename "$file")"; then
+            daemon_changed=$((daemon_changed + 1))
+        fi
+    fi
+done
+
 if [ $daemon_changed -eq 0 ]; then
     echo "  No daemon changes"
 fi

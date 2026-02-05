@@ -24,8 +24,9 @@ speech:
   mode: "notify"               # "notify" = short status phrases, "narrate" = read full response
   # Notify mode settings
   notify_phrases:
+    done: "Over to you"
     permission: "Permission needed"
-    done: "Ready for input"
+    question: "Please choose an option"
   voice: "af_heart"            # Kokoro voice ID (see README for full list)
   speed: 1.0                   # Playback speed (1.0 = normal)
   lang_code: "a"               # Language: a=American, b=British, j=Japanese, z=Chinese, e=Spanish, f=French
