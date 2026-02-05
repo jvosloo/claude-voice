@@ -48,7 +48,6 @@ def _make_daemon(config=None) -> VoiceDaemon:
     d.transcriber.device = d.config.transcription.device
     d.transcriber._model = "loaded_model"
     d.hotkey_listener = MagicMock()
-    d.cleaner = None
     d.afk = MagicMock()
     d.afk.active = False
     d.afk.is_configured = False
@@ -72,7 +71,6 @@ class TestReloadConfigNoChanges:
         assert d.hotkey_listener is old_listener
         d.hotkey_listener.stop.assert_not_called()
         assert d.transcriber._model == old_transcriber_model
-        assert d.cleaner is None
 
     def test_no_changes_prints_summary(self, capsys):
         cfg = _default_config()
@@ -372,67 +370,6 @@ class TestReloadTranscriber:
             d.reload_config()
 
         assert d.transcriber._model == "loaded_model"
-
-
-class TestReloadCleaner:
-
-    def test_enable_cleanup_creates_cleaner(self):
-        d = _make_daemon()
-        assert d.cleaner is None
-        new_cfg = _default_config(
-            input=InputConfig(transcription_cleanup=True, cleanup_model="qwen2.5:1.5b"),
-        )
-
-        with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.main.TranscriptionCleaner") as MockTC:
-            MockTC.return_value = MagicMock()
-            d.reload_config()
-
-        MockTC.assert_called_once_with(model_name="qwen2.5:1.5b", debug=False)
-        assert d.cleaner is MockTC.return_value
-
-    def test_disable_cleanup_removes_cleaner(self):
-        old_cfg = _default_config(
-            input=InputConfig(transcription_cleanup=True, cleanup_model="qwen2.5:1.5b"),
-        )
-        d = _make_daemon(old_cfg)
-        d.cleaner = MagicMock()  # was enabled
-        new_cfg = _default_config(input=InputConfig(transcription_cleanup=False))
-
-        with patch("daemon.main.load_config", return_value=new_cfg):
-            d.reload_config()
-
-        assert d.cleaner is None
-
-    def test_change_cleanup_model_recreates(self):
-        old_cfg = _default_config(
-            input=InputConfig(transcription_cleanup=True, cleanup_model="qwen2.5:1.5b"),
-        )
-        d = _make_daemon(old_cfg)
-        d.cleaner = MagicMock()
-        new_cfg = _default_config(
-            input=InputConfig(transcription_cleanup=True, cleanup_model="llama3:8b"),
-        )
-
-        with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.main.TranscriptionCleaner") as MockTC:
-            MockTC.return_value = MagicMock()
-            d.reload_config()
-
-        MockTC.assert_called_once_with(model_name="llama3:8b", debug=False)
-
-    def test_unchanged_cleanup_not_recreated(self):
-        old_cfg = _default_config(
-            input=InputConfig(transcription_cleanup=True, cleanup_model="qwen2.5:1.5b"),
-        )
-        d = _make_daemon(old_cfg)
-        original_cleaner = MagicMock()
-        d.cleaner = original_cleaner
-
-        with patch("daemon.main.load_config", return_value=deepcopy(old_cfg)):
-            d.reload_config()
-
-        assert d.cleaner is original_cleaner
 
 
 class TestReloadOverlay:

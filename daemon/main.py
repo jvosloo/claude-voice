@@ -35,7 +35,7 @@ from daemon.audio import AudioRecorder
 from daemon.transcribe import Transcriber, apply_word_replacements
 from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
-from daemon.cleanup import TranscriptionCleaner
+from daemon.summarize import ResponseSummarizer
 from daemon.tts import TTSEngine
 from daemon.notify import classify, play_phrase, stop_playback as stop_notify_playback
 from daemon.afk import AfkManager
@@ -57,23 +57,50 @@ _cue_stream: sd.OutputStream | None = None
 _cue_lock = threading.Lock()
 
 
-def _read_mode() -> str:
-    """Read the current TTS mode from the mode file. Defaults to notify."""
+def _read_mode(config=None) -> str:
+    """Read the current TTS mode.
+
+    AFK mode is stored in the mode file (temporary runtime state).
+    All other modes come from config.yaml (user preference).
+    """
+    # Check for AFK override first
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE) as f:
                 mode = f.read().strip()
-            if mode in ("narrate", "notify", "afk"):
-                return mode
+            if mode == "afk":
+                return "afk"
         except OSError:
-            pass  # File read error, use default
-    return "notify"
+            pass
+
+    # Otherwise read from config
+    if config:
+        return config.speech.mode
+
+    # Fallback: read config file directly (for module-level calls)
+    try:
+        import yaml
+        config_path = os.path.expanduser("~/.claude-voice/config.yaml")
+        with open(config_path) as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("speech", {}).get("mode", "notify")
+    except (OSError, ImportError):
+        return "notify"
 
 
-def _write_mode(mode: str) -> None:
-    """Write the current TTS mode to the mode file."""
+def _set_afk_mode() -> None:
+    """Set AFK mode (writes to mode file)."""
     with open(MODE_FILE, "w") as f:
-        f.write(mode)
+        f.write("afk")
+
+
+def _clear_afk_mode() -> None:
+    """Clear AFK mode (removes mode file)."""
+    if os.path.exists(MODE_FILE):
+        try:
+            os.remove(MODE_FILE)
+        except OSError:
+            pass
 
 
 def _play_cue(frequencies: list[int], duration: float = 0.05, sample_rate: int = 44100) -> None:
@@ -150,21 +177,25 @@ class VoiceDaemon:
         self._ready = False  # Set True when fully initialized
         self.afk = AfkManager(self.config)
 
-        # Optional transcription cleanup via LLM
-        self.cleaner = None
-        if self.config.input.transcription_cleanup:
-            self.cleaner = TranscriptionCleaner(
-                model_name=self.config.input.cleanup_model,
-                debug=self.config.input.debug,
-            )
+        # Response summarizer for narrate mode
+        self.summarizer = ResponseSummarizer(
+            model_name=self.config.speech.summarize_model,
+            debug=self.config.input.debug,
+        )
 
     # -- Control socket helpers (called by ControlServer) --
 
     def get_mode(self) -> str:
-        return _read_mode()
+        return _read_mode(self.config)
 
     def set_mode(self, mode: str) -> None:
-        _write_mode(mode)
+        """Set mode. Only used for AFK; other modes come from config.yaml."""
+        if mode == "afk":
+            _set_afk_mode()
+        else:
+            # For notify/narrate, reload config to pick up changes from config.yaml
+            _clear_afk_mode()  # Exit AFK if active
+            self.reload_config()
 
     def get_voice_enabled(self) -> bool:
         return not os.path.exists(SILENT_FLAG)
@@ -242,23 +273,17 @@ class VoiceDaemon:
             self.transcriber.device = new.transcription.device
             changed.append("transcriber(device)")
 
-        # TranscriptionCleaner: recreate if settings changed, destroy if disabled
-        if new.input.transcription_cleanup:
-            if (not old.input.transcription_cleanup
-                    or new.input.cleanup_model != old.input.cleanup_model
-                    or new.input.debug != old.input.debug):
-                self.cleaner = TranscriptionCleaner(
-                    model_name=new.input.cleanup_model,
-                    debug=new.input.debug,
-                )
-                if not self.cleaner.ensure_ready():
-                    self.cleaner = None
-                    changed.append("cleaner(failed)")
-                else:
-                    changed.append("cleaner(recreated)")
-        elif old.input.transcription_cleanup:
-            self.cleaner = None
-            changed.append("cleaner(disabled)")
+        # ResponseSummarizer: recreate if model changed
+        if (new.speech.summarize_model != old.speech.summarize_model
+                or new.input.debug != old.input.debug):
+            self.summarizer = ResponseSummarizer(
+                model_name=new.speech.summarize_model,
+                debug=new.input.debug,
+            )
+            if not self.summarizer.ensure_ready():
+                changed.append("summarizer(failed)")
+            else:
+                changed.append("summarizer(recreated)")
 
         # Overlay: re-init if style changed
         if new.overlay.style != old.overlay.style and new.overlay.enabled:
@@ -349,17 +374,6 @@ class VoiceDaemon:
             print("Voice output enabled")
             return True
 
-        # Mode switching commands
-        if text_lower in ["switch to narrate mode", "switch to narration mode"]:
-            _write_mode("narrate")
-            print("Switched to narrate mode")
-            return True
-
-        if text_lower in ["switch to notify mode", "switch to notification mode"]:
-            _write_mode("notify")
-            print("Switched to notify mode")
-            return True
-
         # AFK mode commands
         if text_lower in self.config.afk.voice_commands_activate:
             self._activate_afk()
@@ -380,14 +394,13 @@ class VoiceDaemon:
         if self.afk.active:
             print("Already in AFK mode")
             return
-        self.afk._previous_mode = _read_mode()
-        _write_mode("afk")
+        _set_afk_mode()
         if self.afk.activate():
             _play_cue(CUE_ASCENDING)
             overlay.show_flash("AFK")
             print("AFK mode activated")
         else:
-            _write_mode(self.afk._previous_mode or "notify")
+            _clear_afk_mode()
             print("AFK mode: Telegram not connected")
 
     def _deactivate_afk(self) -> None:
@@ -395,12 +408,12 @@ class VoiceDaemon:
         from daemon import overlay
         if not self.afk.active:
             return
-        previous = self.afk._previous_mode or "notify"
         self.afk.deactivate()
-        _write_mode(previous)
+        _clear_afk_mode()
         _play_cue(CUE_DESCENDING)
         overlay.show_flash("AFK OFF")
-        print(f"AFK mode deactivated, restored {previous} mode")
+        restored_mode = self.config.speech.mode
+        print(f"AFK mode deactivated, restored {restored_mode} mode")
 
     def _toggle_afk(self) -> None:
         """Toggle AFK mode on/off."""
@@ -494,7 +507,20 @@ class VoiceDaemon:
                         category = classify(text)
                         print(f"Notify: {category}")
                         play_phrase(category, self.config.speech.notify_phrases)
+                    elif mode == "narrate":
+                        # Summarize response before speaking
+                        summary = self.summarizer.summarize(
+                            text, style=self.config.speech.narrate_style
+                        )
+                        if summary:
+                            print(f"Narrate ({self.config.speech.narrate_style}): {summary[:80]}...")
+                            self.tts_engine.speak(summary, voice=voice, speed=speed, lang_code=lang_code)
+                        else:
+                            # Summarization failed, fall back to notify
+                            print("Narrate: summarization failed, using notify fallback")
+                            play_phrase("done", self.config.speech.notify_phrases)
                     else:
+                        # AFK or other modes: speak verbatim
                         self.tts_engine.speak(text, voice=voice, speed=speed, lang_code=lang_code)
             except Exception as e:
                 print(f"TTS server error: {e}")
@@ -533,23 +559,13 @@ class VoiceDaemon:
             print("No speech detected")
             return
 
-        # Apply word replacements (deterministic, before LLM cleanup)
+        # Apply word replacements
         if self.config.transcription.word_replacements:
             replaced = apply_word_replacements(text, self.config.transcription.word_replacements)
             if replaced != text:
                 print(f"Whisper:   {text}")
                 print(f"Replaced:  {replaced}")
                 text = replaced
-
-        # Clean up transcription if enabled
-        if self.cleaner:
-            original = text
-            text = self.cleaner.cleanup(text)
-            print(f"Whisper: {original}")
-            if text != original:
-                print(f"Cleaned: {text}")
-            else:
-                print("Cleaned: (no changes)")
 
         # Check for voice commands first
         if self._handle_voice_command(text):
@@ -635,13 +651,8 @@ class VoiceDaemon:
         print("Press Ctrl+C to stop")
         print("=" * 50)
 
-        # Initialize mode from config (only if no mode file exists yet)
-        # Reset "afk" mode — AFK is never active at startup, so a stale
-        # mode file from a previous session must not persist.
-        if not os.path.exists(MODE_FILE):
-            _write_mode(self.config.speech.mode)
-        elif _read_mode() == "afk":
-            _write_mode(self.config.speech.mode)
+        # Clear any stale AFK mode from a previous session (AFK never persists)
+        _clear_afk_mode()
 
         # Clean stale ask-user flag from a previous crash
         if os.path.exists(ASK_USER_FLAG):
@@ -714,10 +725,9 @@ class VoiceDaemon:
                         interactive=False,
                     )
 
-            # Check transcription cleanup if enabled
-            if self.cleaner:
-                if not self.cleaner.ensure_ready():
-                    self.cleaner = None  # Disable on failure
+            # Check response summarizer for narrate mode
+            if not self.summarizer.ensure_ready():
+                print("  → Narrate mode will fall back to notify phrases")
 
             print("Ready! Hold the hotkey and speak.")
             print()

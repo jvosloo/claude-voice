@@ -14,8 +14,6 @@ class InputConfig:
     auto_submit: bool = False
     min_audio_length: float = 0.5
     typing_delay: float = 0.0
-    transcription_cleanup: bool = False
-    cleanup_model: str = "qwen2.5:1.5b"
     debug: bool = False
 
 @dataclass
@@ -46,6 +44,8 @@ NOTIFY_PHRASES_BY_LANG = {
 class SpeechConfig:
     enabled: bool = True
     mode: str = "notify"                   # "notify" or "narrate"
+    narrate_style: str = "brief"           # "brief", "conversational", or "bullets"
+    summarize_model: str = "qwen2.5:3b"    # Ollama model for narrate summarization
     voice: str = "af_heart"
     speed: float = 1.0
     lang_code: str = "a"
@@ -105,11 +105,15 @@ def load_config() -> Config:
         data = {}
 
     # Strip removed config keys for backward compatibility
+    input_data = data.get('input', {})
+    input_data.pop('transcription_cleanup', None)
+    input_data.pop('cleanup_model', None)
+
     speech_data = data.get('speech', {})
     speech_data.pop('notify_model', None)
 
     return Config(
-        input=InputConfig(**data.get('input', {})),
+        input=InputConfig(**input_data),
         transcription=TranscriptionConfig(**data.get('transcription', {})),
         speech=SpeechConfig(**speech_data),
         audio=AudioConfig(**data.get('audio', {})),

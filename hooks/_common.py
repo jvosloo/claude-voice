@@ -136,14 +136,30 @@ def wait_for_response(response_path: str, timeout: float | None = None) -> str |
 
 
 def read_mode() -> str:
-    """Read the current TTS mode from the mode file."""
+    """Read the current TTS mode.
+
+    Returns 'afk' if in AFK mode, otherwise reads from config.yaml.
+    The mode file only exists when AFK mode is active.
+    """
+    # Check for AFK mode first (stored in mode file)
     if os.path.exists(MODE_FILE):
         try:
             with open(MODE_FILE) as f:
-                return f.read().strip()
+                mode = f.read().strip()
+            if mode == "afk":
+                return "afk"
         except (OSError, ValueError):
             pass
-    return ""
+
+    # Otherwise read from config
+    try:
+        import yaml
+        config_path = os.path.expanduser("~/.claude-voice/config.yaml")
+        with open(config_path) as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("speech", {}).get("mode", "notify")
+    except Exception:
+        return "notify"
 
 
 PERMISSION_RULES_FILE = os.path.expanduser("~/.claude-voice/permission_rules.json")
