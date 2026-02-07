@@ -22,14 +22,18 @@ speech:
   mode: "notify"               # "notify" = short status phrases, "narrate" = summarized response
   narrate_style: "brief"       # "brief" = 1-2 sentences, "conversational" = casual recap, "bullets" = bullet points
   summarize_model: "qwen2.5:3b" # Ollama model for narrate summarization
+  engine: "kokoro"             # "kokoro" (local, free) or "openai" (cloud, ~$30/1M chars)
+  # OpenAI TTS settings (used when engine: "openai")
+  # openai_api_key: ""         # Or set OPENAI_API_KEY env var
+  # openai_model: "tts-1"     # "tts-1" (fast) or "tts-1-hd" (higher quality)
   # Notify mode settings
   notify_phrases:
     done: "Over to you"
     permission: "Permission needed"
     question: "Please choose an option"
-  voice: "af_heart"            # Kokoro voice ID (see README for full list)
+  voice: "af_heart"            # Kokoro: af_heart, bm_daniel, etc. OpenAI: alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer
   speed: 1.0                   # Playback speed (1.0 = normal)
-  lang_code: "a"               # Language: a=American, b=British, j=Japanese, z=Chinese, e=Spanish, f=French
+  lang_code: "a"               # Language: a=American, b=British, j=Japanese, z=Chinese, e=Spanish, f=French (Kokoro only)
   max_chars: null              # Limit spoken output (null = unlimited)
   skip_code_blocks: true       # Don't speak code blocks
   skip_tool_results: true      # Don't speak tool output

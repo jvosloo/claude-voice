@@ -46,6 +46,9 @@ class SpeechConfig:
     mode: str = "notify"                   # "notify" or "narrate"
     narrate_style: str = "brief"           # "brief", "conversational", or "bullets"
     summarize_model: str = "qwen2.5:3b"    # Ollama model for narrate summarization
+    engine: str = "kokoro"                 # "kokoro" (local, free) or "openai" (cloud)
+    openai_api_key: str = ""               # API key (or use OPENAI_API_KEY env var)
+    openai_model: str = "tts-1"            # "tts-1" (fast) or "tts-1-hd" (higher quality)
     voice: str = "af_heart"
     speed: float = 1.0
     lang_code: str = "a"

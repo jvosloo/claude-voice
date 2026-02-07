@@ -36,7 +36,7 @@ from daemon.transcribe import Transcriber, apply_word_replacements
 from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
 from daemon.summarize import ResponseSummarizer
-from daemon.tts import TTSEngine
+from daemon.tts import create_tts_engine
 from daemon.notify import classify, play_phrase, stop_playback as stop_notify_playback
 from daemon.afk import AfkManager
 
@@ -170,7 +170,11 @@ class VoiceDaemon:
             on_combo_2=self._toggle_voice,
         )
 
-        self.tts_engine = TTSEngine()
+        self.tts_engine = create_tts_engine(
+            engine=self.config.speech.engine,
+            api_key=self.config.speech.openai_api_key,
+            model=self.config.speech.openai_model,
+        )
         self._tts_server = None
         self._shutting_down = False
         self._interrupted_tts = False
@@ -291,12 +295,15 @@ class VoiceDaemon:
             overlay.update_style(style=new.overlay.style)
             changed.append("overlay")
 
-        # Notify phrases: regenerate if voice/speed/lang_code changed
+        # Notify phrases: regenerate if voice/speed/lang_code/engine changed
         voice_changed = (
             new.speech.voice != old.speech.voice
             or new.speech.speed != old.speech.speed
             or new.speech.lang_code != old.speech.lang_code
             or new.speech.notify_phrases != old.speech.notify_phrases
+            or new.speech.engine != old.speech.engine
+            or new.speech.openai_api_key != old.speech.openai_api_key
+            or new.speech.openai_model != old.speech.openai_model
         )
         if voice_changed:
             from daemon.notify import regenerate_custom_phrases
@@ -305,9 +312,27 @@ class VoiceDaemon:
                 voice=new.speech.voice,
                 speed=new.speech.speed,
                 lang_code=new.speech.lang_code,
+                engine=new.speech.engine,
+                openai_api_key=new.speech.openai_api_key,
+                openai_model=new.speech.openai_model,
                 interactive=False,
             )
             changed.append("notify_phrases")
+
+        # TTS engine: recreate if engine type or credentials changed
+        engine_changed = (
+            new.speech.engine != old.speech.engine
+            or new.speech.openai_api_key != old.speech.openai_api_key
+            or new.speech.openai_model != old.speech.openai_model
+        )
+        if engine_changed:
+            self.tts_engine.stop_playback()
+            self.tts_engine = create_tts_engine(
+                engine=new.speech.engine,
+                api_key=new.speech.openai_api_key,
+                model=new.speech.openai_model,
+            )
+            changed.append("tts_engine")
 
         # AfkManager: recreate with new config
         if (new.afk.telegram.bot_token != old.afk.telegram.bot_token
@@ -661,6 +686,7 @@ class VoiceDaemon:
             except OSError:
                 pass
         print(f"TTS mode: {_read_mode()}")
+        print(f"TTS engine: {self.config.speech.engine}")
         if self.afk.is_configured:
             print(f"AFK mode: configured (Telegram)")
         else:
@@ -703,6 +729,9 @@ class VoiceDaemon:
                     voice=self.config.speech.voice,
                     speed=self.config.speech.speed,
                     lang_code=self.config.speech.lang_code,
+                    engine=self.config.speech.engine,
+                    openai_api_key=self.config.speech.openai_api_key,
+                    openai_model=self.config.speech.openai_model,
                     interactive=True,
                 )
 
@@ -722,6 +751,9 @@ class VoiceDaemon:
                         voice=self.config.speech.voice,
                         speed=self.config.speech.speed,
                         lang_code=self.config.speech.lang_code,
+                        engine=self.config.speech.engine,
+                        openai_api_key=self.config.speech.openai_api_key,
+                        openai_model=self.config.speech.openai_model,
                         interactive=False,
                     )
 

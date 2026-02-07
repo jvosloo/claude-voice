@@ -90,6 +90,10 @@ class TestSummarizerPostProcessing:
         result = self._run_summarize("Here's the summary: I fixed the bug.")
         assert result == "the summary: I fixed the bug."  # Only strips "here's"
 
+    def test_strips_sure_prefix(self):
+        result = self._run_summarize("Sure, here's a summary in two sentences. I fixed the bug.")
+        assert result == "here's a summary in two sentences. I fixed the bug."
+
     def test_strips_double_quotes(self):
         result = self._run_summarize('"I fixed the bug."')
         assert result == "I fixed the bug."

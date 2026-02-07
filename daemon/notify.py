@@ -71,13 +71,16 @@ def regenerate_custom_phrases(
     voice: str = "af_heart",
     speed: float = 1.0,
     lang_code: str = "a",
+    engine: str = "kokoro",
+    openai_api_key: str = "",
+    openai_model: str = "tts-1",
     interactive: bool = False,
 ) -> None:
-    """Regenerate notification phrases with Kokoro TTS.
+    """Regenerate notification phrases with the configured TTS engine.
 
     Regenerates all phrases (defaults + custom overrides) when the voice,
-    speed, or lang_code changes. Custom phrase text changes also trigger
-    regeneration for those phrases.
+    speed, lang_code, or engine changes. Custom phrase text changes also
+    trigger regeneration for those phrases.
     """
     import yaml
     from daemon.config import DEFAULT_NOTIFY_PHRASES, NOTIFY_PHRASES_BY_LANG
@@ -89,15 +92,16 @@ def regenerate_custom_phrases(
     if config_phrases:
         all_phrases.update(config_phrases)
 
-    # Check cached voice/speed/lang_code
+    # Check cached voice/speed/lang_code/engine
     os.makedirs(_CACHE_DIR, exist_ok=True)
     prev_meta = {}
     if os.path.exists(_CACHE_META):
         with open(_CACHE_META) as f:
             prev_meta = yaml.safe_load(f) or {}
 
-    voice_key = f"{voice}/{speed}/{lang_code}"
-    prev_voice_key = "{}/{}/{}".format(
+    voice_key = f"{engine}/{voice}/{speed}/{lang_code}"
+    prev_voice_key = "{}/{}/{}/{}".format(
+        prev_meta.get("engine", ""),
         prev_meta.get("voice", ""),
         prev_meta.get("speed", ""),
         prev_meta.get("lang_code", ""),
@@ -116,6 +120,8 @@ def regenerate_custom_phrases(
     if not needs_regen:
         return
 
+    meta = {"engine": engine, "voice": voice, "speed": speed, "lang_code": lang_code, "phrases": dict(all_phrases)}
+
     # If voice changed, ask user in interactive mode
     if voice_changed and interactive:
         answer = input(
@@ -124,35 +130,88 @@ def regenerate_custom_phrases(
         if answer in ("n", "no"):
             # Update meta so we don't ask again
             with open(_CACHE_META, "w") as f:
-                yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code, "phrases": dict(all_phrases)}, f)
+                yaml.dump(meta, f)
             return
 
-    # Generate with Kokoro
     print("Generating notification phrases...")
     try:
-        import numpy as np
-        import soundfile as sf
-        from mlx_audio.tts import load
-        import mlx.core as mx
-
-        model = load("mlx-community/Kokoro-82M-bf16")
-
-        for cat, text in needs_regen.items():
-            chunks = []
-            for result in model.generate(text, voice=voice, speed=speed, lang_code=lang_code):
-                chunks.append(result.audio)
-            audio = mx.concatenate(chunks)
-            audio_np = np.array(audio, dtype=np.float32)
-            out_path = os.path.join(_CACHE_DIR, f"{cat}.wav")
-            from daemon.tts import SAMPLE_RATE
-            sf.write(out_path, audio_np, SAMPLE_RATE)
-            print(f'  Generated: {cat} -> "{text}"')
+        if engine == "openai":
+            _regen_openai(needs_regen, voice, speed, openai_api_key, openai_model)
+        else:
+            _regen_kokoro(needs_regen, voice, speed, lang_code)
 
         # Update meta
         with open(_CACHE_META, "w") as f:
-            yaml.dump({"voice": voice, "speed": speed, "lang_code": lang_code, "phrases": dict(all_phrases)}, f)
+            yaml.dump(meta, f)
 
         print("Notification phrases ready.")
     except Exception as e:
         print(f"Failed to generate phrases: {e}")
         print("Using default phrases as fallback.")
+
+
+def _regen_kokoro(needs_regen: dict, voice: str, speed: float, lang_code: str) -> None:
+    """Generate phrases with local Kokoro TTS."""
+    import numpy as np
+    import soundfile as sf
+    from mlx_audio.tts import load
+    import mlx.core as mx
+
+    model = load("mlx-community/Kokoro-82M-bf16")
+
+    for cat, text in needs_regen.items():
+        chunks = []
+        for result in model.generate(text, voice=voice, speed=speed, lang_code=lang_code):
+            chunks.append(result.audio)
+        audio = mx.concatenate(chunks)
+        audio_np = np.array(audio, dtype=np.float32)
+        out_path = os.path.join(_CACHE_DIR, f"{cat}.wav")
+        from daemon.tts import SAMPLE_RATE
+        sf.write(out_path, audio_np, SAMPLE_RATE)
+        print(f'  Generated: {cat} -> "{text}"')
+
+
+def _regen_openai(needs_regen: dict, voice: str, speed: float, api_key: str, model: str) -> None:
+    """Generate phrases with OpenAI TTS API."""
+    import requests
+    import tempfile
+
+    key = api_key or os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        raise ValueError("No OpenAI API key configured")
+
+    for cat, text in needs_regen.items():
+        response = requests.post(
+            "https://api.openai.com/v1/audio/speech",
+            headers={"Authorization": f"Bearer {key}"},
+            json={
+                "model": model,
+                "input": text,
+                "voice": voice,
+                "speed": speed,
+                "response_format": "wav",
+            },
+            timeout=30,
+        )
+        if not response.ok:
+            detail = ""
+            try:
+                body = response.json()
+                detail = body.get("error", {}).get("message", response.text)
+            except Exception:
+                detail = response.text
+            raise RuntimeError(f"OpenAI TTS API error (HTTP {response.status_code}): {detail}")
+        out_path = os.path.join(_CACHE_DIR, f"{cat}.wav")
+        # Atomic write: temp file + rename (prevents play_phrase reading partial data)
+        fd, tmp_path = tempfile.mkstemp(suffix=".wav", dir=_CACHE_DIR)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(response.content)
+            os.rename(tmp_path, out_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        print(f'  Generated: {cat} -> "{text}"')

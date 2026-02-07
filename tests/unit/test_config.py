@@ -48,6 +48,9 @@ class TestLoadConfig:
         assert isinstance(cfg, Config)
         assert cfg.input.hotkey == "right_alt"
         assert cfg.speech.mode == "notify"
+        assert cfg.speech.engine == "kokoro"
+        assert cfg.speech.openai_api_key == ""
+        assert cfg.speech.openai_model == "tts-1"
 
     def test_valid_yaml_parsed(self):
         yaml_content = """
@@ -80,6 +83,20 @@ speech:
             with patch("builtins.open", mock_open(read_data=yaml_content)):
                 cfg = load_config()
         assert cfg.speech.mode == "notify"
+
+    def test_openai_engine_yaml_parsed(self):
+        yaml_content = """
+speech:
+  engine: "openai"
+  openai_api_key: "sk-yaml-key"
+  openai_model: "tts-1-hd"
+"""
+        with patch("daemon.config.os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=yaml_content)):
+                cfg = load_config()
+        assert cfg.speech.engine == "openai"
+        assert cfg.speech.openai_api_key == "sk-yaml-key"
+        assert cfg.speech.openai_model == "tts-1-hd"
 
     def test_partial_config_fills_defaults(self):
         yaml_content = """

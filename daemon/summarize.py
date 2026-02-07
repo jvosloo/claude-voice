@@ -7,15 +7,18 @@ import time
 # Style-specific prompts for summarization
 STYLE_PROMPTS = {
     "brief": """Summarize what was done in 1-2 short sentences. Focus on actions and outcomes.
-Be direct: "I did X" not "The assistant did X". Omit technical details.""",
+Be direct: "I did X" not "The assistant did X". Omit technical details.
+Output ONLY the summary. No preamble, no "Sure", no "Here's a summary".""",
 
     "conversational": """Give a natural, spoken recap of what happened. Use casual language like you're
 explaining to a colleague. Start with context if helpful. 2-4 sentences max.
-Be direct: "I did X" not "The assistant did X".""",
+Be direct: "I did X" not "The assistant did X".
+Output ONLY the summary. No preamble, no "Sure", no "Here's a summary".""",
 
     "bullets": """Summarize as 2-4 brief spoken bullet points. Start each with "First," "Second,"
 "Then," "Finally," etc. Keep each point under 10 words.
-Be direct: "Fixed the bug" not "The assistant fixed the bug".""",
+Be direct: "Fixed the bug" not "The assistant fixed the bug".
+Output ONLY the summary. No preamble, no "Sure", no "Here's a summary".""",
 }
 
 # Minimum text length to bother summarizing (chars)
@@ -188,8 +191,9 @@ Summary:'''
             if not summary:
                 return None
 
-            # Strip common prefixes if model included them
-            for prefix in ("summary:", "output:", "here's"):
+            # Strip common LLM preamble prefixes
+            for prefix in ("summary:", "output:", "here's", "sure,", "sure!", "sure.",
+                           "here is", "here are"):
                 if summary.lower().startswith(prefix):
                     summary = summary[len(prefix):].strip()
 

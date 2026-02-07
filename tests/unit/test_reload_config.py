@@ -48,6 +48,7 @@ def _make_daemon(config=None) -> VoiceDaemon:
     d.transcriber.device = d.config.transcription.device
     d.transcriber._model = "loaded_model"
     d.hotkey_listener = MagicMock()
+    d.tts_engine = MagicMock()
     d.afk = MagicMock()
     d.afk.active = False
     d.afk.is_configured = False
@@ -495,3 +496,102 @@ class TestReloadConfigStoresNew:
         assert "keyboard(typing_delay)" in out
         assert "keyboard(auto_submit)" in out
         assert "audio(sample_rate)" in out
+
+
+class TestReloadTTSEngine:
+
+    def test_engine_change_recreates_engine(self):
+        d = _make_daemon()
+        old_engine = d.tts_engine
+        new_cfg = _default_config(speech=SpeechConfig(engine="openai", openai_api_key="sk-test"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.create_tts_engine") as mock_factory:
+            mock_factory.return_value = MagicMock()
+            d.reload_config()
+
+        mock_factory.assert_called_once_with(
+            engine="openai",
+            api_key="sk-test",
+            model="tts-1",
+        )
+        assert d.tts_engine is mock_factory.return_value
+
+    def test_api_key_change_recreates_engine(self):
+        old_speech = SpeechConfig(engine="openai", openai_api_key="sk-old")
+        d = _make_daemon(_default_config(speech=old_speech))
+        new_cfg = _default_config(speech=SpeechConfig(engine="openai", openai_api_key="sk-new"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.create_tts_engine") as mock_factory:
+            mock_factory.return_value = MagicMock()
+            d.reload_config()
+
+        mock_factory.assert_called_once_with(
+            engine="openai",
+            api_key="sk-new",
+            model="tts-1",
+        )
+
+    def test_model_change_recreates_engine(self):
+        old_speech = SpeechConfig(engine="openai", openai_api_key="sk-test", openai_model="tts-1")
+        d = _make_daemon(_default_config(speech=old_speech))
+        new_cfg = _default_config(speech=SpeechConfig(engine="openai", openai_api_key="sk-test", openai_model="tts-1-hd"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.create_tts_engine") as mock_factory:
+            mock_factory.return_value = MagicMock()
+            d.reload_config()
+
+        mock_factory.assert_called_once_with(
+            engine="openai",
+            api_key="sk-test",
+            model="tts-1-hd",
+        )
+
+    def test_unchanged_engine_not_recreated(self):
+        cfg = _default_config()
+        d = _make_daemon(cfg)
+        old_engine = d.tts_engine
+
+        with patch("daemon.main.load_config", return_value=deepcopy(cfg)), \
+             patch("daemon.main.create_tts_engine") as mock_factory:
+            d.reload_config()
+
+        mock_factory.assert_not_called()
+        assert d.tts_engine is old_engine
+
+    def test_engine_change_stops_old_playback(self):
+        d = _make_daemon()
+        old_engine = d.tts_engine
+        new_cfg = _default_config(speech=SpeechConfig(engine="openai", openai_api_key="sk-test"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.create_tts_engine", return_value=MagicMock()):
+            d.reload_config()
+
+        old_engine.stop_playback.assert_called_once()
+
+    def test_engine_change_listed_in_summary(self, capsys):
+        d = _make_daemon()
+        new_cfg = _default_config(speech=SpeechConfig(engine="openai", openai_api_key="sk-test"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.create_tts_engine", return_value=MagicMock()):
+            d.reload_config()
+
+        assert "tts_engine" in capsys.readouterr().out
+
+    def test_engine_only_change_regenerates_notify_phrases(self):
+        """Switching engine without changing voice/speed/lang_code must regenerate phrases."""
+        d = _make_daemon()
+        new_cfg = _default_config(speech=SpeechConfig(engine="openai", openai_api_key="sk-test"))
+
+        with patch("daemon.main.load_config", return_value=new_cfg), \
+             patch("daemon.main.create_tts_engine", return_value=MagicMock()), \
+             patch("daemon.notify.regenerate_custom_phrases") as mock_regen:
+            d.reload_config()
+
+        mock_regen.assert_called_once()
+        assert mock_regen.call_args[1]["engine"] == "openai"
+        assert mock_regen.call_args[1]["openai_api_key"] == "sk-test"
