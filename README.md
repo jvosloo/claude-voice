@@ -4,7 +4,7 @@ Push-to-talk voice input for macOS. Transcribes speech and types it into any foc
 
 When used with Claude Code, two voice output modes are available:
 - **Notify mode** (default) — plays short status phrases ("Over to you", "Permission needed", "Please choose an option")
-- **Narrate mode** — reads Claude's full response aloud via neural TTS
+- **Narrate mode** — summarizes Claude's response and speaks it aloud via neural TTS
 
 **Platform:** macOS (uses `afplay` for audio playback)
 
@@ -231,23 +231,28 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `voice` | `af_heart` | Kokoro voice ID (see Available Voices below) |
+| `engine` | `kokoro` | TTS engine: `kokoro` (local, free) or `openai` (cloud) |
+| `voice` | `af_heart` | Voice ID (see Available Voices below) |
 | `speed` | `1.0` | Playback speed (1.0 = normal) |
-| `lang_code` | `a` | Language code: `a` American, `b` British, `j` Japanese, `z` Chinese, `e` Spanish, `f` French |
-| `mode` | `notify` | `notify` (status phrases) or `narrate` (read full responses) |
+| `lang_code` | `a` | Language code: `a` American, `b` British, `j` Japanese, `z` Chinese, `e` Spanish, `f` French (Kokoro only) |
+| `mode` | `notify` | `notify` (status phrases) or `narrate` (summarized responses) |
+| `narrate_style` | `brief` | Summarization style: `brief`, `conversational`, or `bullets` |
+| `summarize_model` | `qwen2.5:3b` | Ollama model for narrate summarization |
 | `enabled` | `true` | Enable/disable TTS output |
 | `max_chars` | `null` | Limit spoken output length (`null` = unlimited) |
 | `skip_code_blocks` | `true` | Don't speak code blocks |
 | `skip_tool_results` | `true` | Don't speak tool result output |
 | `notify_phrases` | *(defaults)* | Custom phrase overrides per category (done, permission, question) |
 | `hotkey` | `left_alt+v` | Combo hotkey to toggle voice on/off (`null` to disable) |
+| `openai_api_key` | `""` | OpenAI API key (or set `OPENAI_API_KEY` env var) |
+| `openai_model` | `tts-1` | OpenAI model: `tts-1` (fast) or `tts-1-hd` (higher quality) |
 
 ### Transcription Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `backend` | `mlx` | `mlx` (fast on Apple Silicon) or `faster-whisper` (CPU) |
-| `model` | `large-v3` | Whisper model (see table below) |
+| `model` | `large-v3-turbo` | Whisper model (see table below) |
 | `language` | `en` | Default language code |
 | `extra_languages` | `[]` | Additional languages to cycle through (e.g. `["af", "de"]`) |
 | `device` | `cpu` | Compute device for faster-whisper: `cpu` or `cuda` |
@@ -259,13 +264,14 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 |-------|------|-------|----------|-------|
 | `tiny.en` | ~40MB | Fastest | Basic | Good for quick tests |
 | `base.en` | ~150MB | Fast | Good | Balanced |
-| `small.en` | ~500MB | Medium | Better | Recommended |
-| `medium.en` | ~1.5GB | Slower | Great | High accuracy |
-| `large-v3` | ~3GB | Slowest | Best | Default, MLX recommended |
+| `small.en` | ~500MB | Medium | Better | English only |
+| `medium.en` | ~1.5GB | Slower | Great | English only, high accuracy |
+| `large-v3-turbo` | ~1.6GB | Fast | Near-best | **Default**, multilingual, recommended |
+| `large-v3` | ~3GB | Slowest | Best | Multilingual, highest accuracy |
 
-**Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast.
+**Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast. `large-v3-turbo` is 6x faster with nearly identical accuracy.
 
-**Note:** The `.en` models (e.g. `base.en`) only support English. To use `extra_languages`, you need a multilingual model like `large-v3`.
+**Note:** The `.en` models (e.g. `base.en`) only support English. To use `extra_languages`, you need a multilingual model like `large-v3-turbo` or `large-v3`.
 
 ### Word Replacements
 
@@ -289,8 +295,6 @@ Replacements are applied immediately after transcription, before any LLM cleanup
 | `auto_submit` | `false` | Press Enter automatically after transcription |
 | `min_audio_length` | `0.5` | Ignore recordings shorter than this (seconds) |
 | `typing_delay` | `0` | Delay between keystrokes (seconds, e.g. `0.005` for a slight delay) |
-| `transcription_cleanup` | `false` | Clean up transcription using local LLM (requires Ollama) |
-| `cleanup_model` | `qwen2.5:1.5b` | Ollama model for transcription cleanup |
 
 **Available hotkeys:** `right_alt`, `left_alt`, `right_cmd`, `left_cmd`, `right_ctrl`, `left_ctrl`, `right_shift`, `caps_lock`, `f18`, `f19`
 
@@ -304,6 +308,8 @@ Replacements are applied immediately after transcription, before any LLM cleanup
 ---
 
 ## Available Voices
+
+### Kokoro (Local)
 
 Kokoro TTS provides 54 voice presets. The model downloads automatically on first use (~360MB).
 
@@ -330,6 +336,12 @@ Kokoro TTS provides 54 voice presets. The model downloads automatically on first
 | `bm_george` | Male |
 
 Full voice list: https://huggingface.co/mlx-community/Kokoro-82M-bf16/blob/main/VOICES.md
+
+### OpenAI (Cloud)
+
+Set `engine: "openai"` to use OpenAI's TTS API. Requires an API key.
+
+**Available voices:** `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`
 
 ---
 

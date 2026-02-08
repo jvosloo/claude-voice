@@ -8,7 +8,7 @@ input:
   typing_delay: 0              # Delay between keystrokes (seconds), e.g. 0.005 for a slight delay
 
 transcription:
-  model: "large-v3"             # tiny.en, base.en, small.en, medium.en, large-v3
+  model: "large-v3-turbo"       # tiny.en, base.en, small.en, medium.en, large-v3, large-v3-turbo
   language: "en"
   device: "cpu"                # cpu or cuda (for faster-whisper)
   backend: "mlx"               # "faster-whisper" or "mlx" (mlx is faster on Apple Silicon)

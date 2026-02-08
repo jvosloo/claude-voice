@@ -18,7 +18,7 @@ class InputConfig:
 
 @dataclass
 class TranscriptionConfig:
-    model: str = "large-v3"
+    model: str = "large-v3-turbo"
     language: str = "en"
     device: str = "cpu"
     backend: str = "mlx"  # "faster-whisper" or "mlx"

@@ -28,6 +28,7 @@ class Transcriber:
         "small.en": "mlx-community/whisper-small.en-mlx",
         "medium.en": "mlx-community/whisper-medium.en-mlx",
         "large-v3": "mlx-community/whisper-large-v3-mlx",
+        "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
     }
 
     def __init__(self, model_name: str = "base.en", device: str = "cpu", backend: str = "faster-whisper"):
@@ -87,7 +88,13 @@ class Transcriber:
         import mlx_whisper
 
         # Get MLX model repo name
-        mlx_model = self.MLX_MODELS.get(self.model_name, f"mlx-community/whisper-{self.model_name}-mlx")
+        mlx_model = self.MLX_MODELS.get(self.model_name)
+        if mlx_model is None:
+            valid = ", ".join(self.MLX_MODELS.keys())
+            print(f"WARNING: Unknown model '{self.model_name}', falling back to large-v3. "
+                  f"Valid models: {valid}")
+            self.model_name = "large-v3"
+            mlx_model = self.MLX_MODELS["large-v3"]
 
         result = mlx_whisper.transcribe(
             audio,
