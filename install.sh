@@ -325,10 +325,10 @@ settings_path = os.path.expanduser("~/.claude/settings.json")
 
 # Claude Voice hook definitions
 CV_HOOKS = {
-    "Stop": {"matcher": "", "command": "~/.claude/hooks/speak-response.py"},
+    "Stop": {"matcher": "", "command": "~/.claude/hooks/speak-response.py", "timeout": 10800},
     "Notification": {"matcher": "permission_prompt", "command": "~/.claude/hooks/notify-permission.py"},
-    "PreToolUse": {"matcher": "AskUserQuestion", "command": "~/.claude/hooks/handle-ask-user.py"},
-    "PermissionRequest": {"matcher": "", "command": "~/.claude/hooks/permission-request.py"},
+    "PreToolUse": {"matcher": "AskUserQuestion", "command": "~/.claude/hooks/handle-ask-user.py", "timeout": 10800},
+    "PermissionRequest": {"matcher": "", "command": "~/.claude/hooks/permission-request.py", "timeout": 10800},
 }
 
 # All claude-voice hook script filenames (for filtering)
@@ -358,9 +358,12 @@ for category, defn in CV_HOOKS.items():
     other_hooks = [e for e in existing if not is_cv_hook(e)]
 
     # Append our hook
+    hook_obj = {"type": "command", "command": defn["command"]}
+    if "timeout" in defn:
+        hook_obj["timeout"] = defn["timeout"]
     cv_entry = {
         "matcher": defn["matcher"],
-        "hooks": [{"type": "command", "command": defn["command"]}],
+        "hooks": [hook_obj],
     }
     new_list = other_hooks + [cv_entry]
 
