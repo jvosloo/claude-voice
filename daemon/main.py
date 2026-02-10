@@ -332,6 +332,8 @@ class VoiceDaemon:
                 api_key=new.speech.openai_api_key,
                 model=new.speech.openai_model,
             )
+            if hasattr(self.tts_engine, 'set_emitter') and hasattr(self, 'control_server'):
+                self.tts_engine.set_emitter(self.control_server.emit)
             changed.append("tts_engine")
 
         # AfkManager: recreate with new config
@@ -774,6 +776,10 @@ class VoiceDaemon:
             control_thread = threading.Thread(target=self.control_server.run, daemon=True, name="control-server")
             control_thread.start()
             print("Control server listening on ~/.claude-voice/.control.sock")
+
+            # Wire TTS error events to socket subscribers
+            if hasattr(self.tts_engine, 'set_emitter'):
+                self.tts_engine.set_emitter(self.control_server.emit)
 
             # Start Telegram polling (always-on for /afk command)
             if self.afk.is_configured:

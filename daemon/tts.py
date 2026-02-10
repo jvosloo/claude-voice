@@ -111,6 +111,26 @@ class OpenAITTSEngine:
         self._model = model
         self._lock = threading.Lock()
         self._playback_proc = None
+        self._error_active = False
+        self._emit = None
+
+    def set_emitter(self, fn):
+        """Wire up the event callback for error reporting."""
+        self._emit = fn
+
+    def _report_error(self, message: str, code: str):
+        """Emit an error event (deduplicated — only on first failure)."""
+        if not self._error_active:
+            self._error_active = True
+            if self._emit:
+                self._emit({"event": "error", "source": "openai_tts", "message": message, "code": code})
+
+    def _clear_error(self):
+        """Emit an error_cleared event (only if currently in error state)."""
+        if self._error_active:
+            self._error_active = False
+            if self._emit:
+                self._emit({"event": "error_cleared", "source": "openai_tts"})
 
     def _ensure_model(self):
         """No-op — no local model to load."""
@@ -130,6 +150,7 @@ class OpenAITTSEngine:
 
         if not self._api_key:
             print("OpenAI TTS: no API key configured (set speech.openai_api_key or OPENAI_API_KEY env var)")
+            self._report_error("No OpenAI API key configured", "no_api_key")
             return
 
         tmp_path = None
@@ -164,8 +185,11 @@ class OpenAITTSEngine:
             with self._lock:
                 self._playback_proc = None
 
+            self._clear_error()
+
         except requests.Timeout:
             print("OpenAI TTS error: request timed out (30s)")
+            self._report_error("Cannot reach OpenAI API", "network_error")
         except requests.HTTPError as e:
             status = e.response.status_code if e.response is not None else "unknown"
             detail = ""
@@ -177,14 +201,23 @@ class OpenAITTSEngine:
                     detail = e.response.text
             if status == 401:
                 print(f"OpenAI TTS error: invalid API key (HTTP 401): {detail}")
+                self._report_error("Invalid OpenAI API key", "invalid_key")
             elif status == 429:
                 print(f"OpenAI TTS error: rejected (HTTP 429): {detail}")
+                body_text = e.response.text if e.response is not None else ""
+                if "insufficient_quota" in body_text:
+                    self._report_error("Insufficient credits \u2014 check OpenAI billing", "insufficient_quota")
+                else:
+                    self._report_error("OpenAI rate limited", "rate_limited")
             else:
                 print(f"OpenAI TTS error: HTTP {status}: {detail}")
+                self._report_error(f"OpenAI TTS error: HTTP {status}", "unknown")
         except requests.ConnectionError:
             print("OpenAI TTS error: cannot reach api.openai.com")
+            self._report_error("Cannot reach OpenAI API", "network_error")
         except Exception as e:
             print(f"OpenAI TTS error: {type(e).__name__}: {e}")
+            self._report_error(f"OpenAI TTS error: {e}", "unknown")
         finally:
             if tmp_path:
                 try:

@@ -207,3 +207,162 @@ class TestOpenAITTSEngine:
 
         mock_kill.assert_called_once_with(None)
         assert result is False
+
+
+class TestOpenAITTSErrorEvents:
+    """Tests for error/error_cleared event emission."""
+
+    def _make_engine(self):
+        engine = OpenAITTSEngine(api_key="sk-test")
+        emitter = MagicMock()
+        engine.set_emitter(emitter)
+        return engine, emitter
+
+    def _make_success_response(self):
+        mock_response = MagicMock()
+        mock_response.content = b"fake-wav-data"
+        mock_response.raise_for_status = MagicMock()
+        return mock_response
+
+    def _make_http_error(self, status_code, message, error_type="error"):
+        import json
+        mock_response = MagicMock()
+        mock_response.status_code = status_code
+        body = {"error": {"message": message, "type": error_type}}
+        mock_response.json.return_value = body
+        mock_response.text = json.dumps(body)
+        return requests_lib.HTTPError(response=mock_response), mock_response
+
+    def test_no_api_key_emits_error(self):
+        with patch.dict("os.environ", {}, clear=True):
+            engine = OpenAITTSEngine(api_key="")
+        emitter = MagicMock()
+        engine.set_emitter(emitter)
+
+        engine.speak("Hello")
+
+        emitter.assert_called_once_with({
+            "event": "error", "source": "openai_tts",
+            "message": "No OpenAI API key configured", "code": "no_api_key",
+        })
+
+    def test_401_emits_invalid_key(self):
+        engine, emitter = self._make_engine()
+        error, mock_resp = self._make_http_error(401, "Incorrect API key")
+        mock_resp.raise_for_status.side_effect = error
+
+        with patch.object(requests_lib, "post", return_value=mock_resp):
+            engine.speak("Hello")
+
+        emitter.assert_called_once_with({
+            "event": "error", "source": "openai_tts",
+            "message": "Invalid OpenAI API key", "code": "invalid_key",
+        })
+
+    def test_429_insufficient_quota(self):
+        engine, emitter = self._make_engine()
+        error, mock_resp = self._make_http_error(
+            429, "You exceeded your current quota", "insufficient_quota"
+        )
+        mock_resp.raise_for_status.side_effect = error
+
+        with patch.object(requests_lib, "post", return_value=mock_resp):
+            engine.speak("Hello")
+
+        emitter.assert_called_once_with({
+            "event": "error", "source": "openai_tts",
+            "message": "Insufficient credits \u2014 check OpenAI billing",
+            "code": "insufficient_quota",
+        })
+
+    def test_429_rate_limited(self):
+        engine, emitter = self._make_engine()
+        error, mock_resp = self._make_http_error(429, "Rate limit exceeded")
+        mock_resp.raise_for_status.side_effect = error
+
+        with patch.object(requests_lib, "post", return_value=mock_resp):
+            engine.speak("Hello")
+
+        emitter.assert_called_once_with({
+            "event": "error", "source": "openai_tts",
+            "message": "OpenAI rate limited", "code": "rate_limited",
+        })
+
+    def test_timeout_emits_network_error(self):
+        engine, emitter = self._make_engine()
+
+        with patch.object(requests_lib, "post", side_effect=requests_lib.Timeout()):
+            engine.speak("Hello")
+
+        emitter.assert_called_once_with({
+            "event": "error", "source": "openai_tts",
+            "message": "Cannot reach OpenAI API", "code": "network_error",
+        })
+
+    def test_connection_error_emits_network_error(self):
+        engine, emitter = self._make_engine()
+
+        with patch.object(requests_lib, "post", side_effect=requests_lib.ConnectionError()):
+            engine.speak("Hello")
+
+        emitter.assert_called_once_with({
+            "event": "error", "source": "openai_tts",
+            "message": "Cannot reach OpenAI API", "code": "network_error",
+        })
+
+    def test_duplicate_errors_suppressed(self):
+        engine, emitter = self._make_engine()
+
+        with patch.object(requests_lib, "post", side_effect=requests_lib.Timeout()):
+            engine.speak("Hello")
+            engine.speak("Hello again")
+
+        # Only one error event, not two
+        emitter.assert_called_once()
+
+    def test_success_clears_error(self):
+        engine, emitter = self._make_engine()
+        mock_proc = MagicMock()
+        mock_proc.wait = MagicMock()
+
+        # First: trigger an error
+        with patch.object(requests_lib, "post", side_effect=requests_lib.Timeout()):
+            engine.speak("Hello")
+
+        assert engine._error_active is True
+        emitter.reset_mock()
+
+        # Then: succeed
+        resp = self._make_success_response()
+        with patch.object(requests_lib, "post", return_value=resp), \
+             patch("subprocess.Popen", return_value=mock_proc), \
+             patch("os.unlink"):
+            engine.speak("Hello")
+
+        assert engine._error_active is False
+        emitter.assert_called_once_with({
+            "event": "error_cleared", "source": "openai_tts",
+        })
+
+    def test_no_clear_event_without_prior_error(self):
+        engine, emitter = self._make_engine()
+        mock_proc = MagicMock()
+        mock_proc.wait = MagicMock()
+
+        resp = self._make_success_response()
+        with patch.object(requests_lib, "post", return_value=resp), \
+             patch("subprocess.Popen", return_value=mock_proc), \
+             patch("os.unlink"):
+            engine.speak("Hello")
+
+        emitter.assert_not_called()
+
+    def test_no_emitter_does_not_crash(self):
+        """Error tracking works even without an emitter wired up."""
+        engine = OpenAITTSEngine(api_key="sk-test")
+        # No set_emitter call
+
+        with patch.object(requests_lib, "post", side_effect=requests_lib.Timeout()):
+            engine.speak("Hello")  # Should not raise
+
+        assert engine._error_active is True

@@ -26,6 +26,8 @@ Events (daemon → subscribed clients):
     {"event": "recording_start"}
     {"event": "recording_stop"}
     {"event": "config_reloaded"}
+    {"event": "error", "source": "openai_tts", "message": "...", "code": "..."}
+    {"event": "error_cleared", "source": "openai_tts"}
 """
 
 import json
