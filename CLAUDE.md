@@ -72,7 +72,7 @@ YAML at `~/.claude-voice/config.yaml` (see `config.yaml.example`). Hot-reloads w
 ### State Files (all in `~/.claude-voice/`)
 
 - `.silent` — flag file disabling voice output
-- `.mode` — current TTS mode (`notify`/`narrate`/`afk`)
+- `.mode` — AFK mode flag (only written when AFK is active; notify/narrate come from `config.yaml`)
 - `daemon.pid` — daemon process ID
 - `permission_rules.json` — stored "always allow" rules from AFK mode
 
