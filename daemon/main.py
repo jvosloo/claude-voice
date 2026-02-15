@@ -579,7 +579,17 @@ class VoiceDaemon:
 
         overlay.show_transcribing()
         print(f"Transcribing {duration:.1f}s of audio...")
-        text = self.transcriber.transcribe(audio, language=self.hotkey_listener.active_language)
+
+        # Build initial_prompt from word_replacements to bias Whisper toward domain vocabulary
+        initial_prompt = None
+        if self.config.transcription.word_replacements:
+            vocab = list(dict.fromkeys(self.config.transcription.word_replacements.values()))
+            initial_prompt = ", ".join(vocab)
+
+        text = self.transcriber.transcribe(
+            audio, language=self.hotkey_listener.active_language,
+            initial_prompt=initial_prompt,
+        )
 
         if not text:
             overlay.hide()

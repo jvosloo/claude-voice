@@ -58,13 +58,16 @@ class Transcriber:
                     )
         return self._model
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "en") -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000, language: str = "en",
+                   initial_prompt: Optional[str] = None) -> str:
         """Transcribe audio to text.
 
         Args:
             audio: Audio data as float32 numpy array
             sample_rate: Sample rate (must be 16000 for Whisper)
             language: Language code for transcription (e.g. "en", "af", "de")
+            initial_prompt: Optional text to condition the model on, biasing it
+                toward recognizing specific vocabulary (e.g. "Claude, pytest, TypeScript")
 
         Returns:
             Transcribed text string
@@ -79,11 +82,12 @@ class Transcriber:
             audio = audio.astype(np.float32)
 
         if self.backend == "mlx":
-            return self._transcribe_mlx(audio, language=language)
+            return self._transcribe_mlx(audio, language=language, initial_prompt=initial_prompt)
         else:
-            return self._transcribe_faster_whisper(audio, language=language)
+            return self._transcribe_faster_whisper(audio, language=language, initial_prompt=initial_prompt)
 
-    def _transcribe_mlx(self, audio: np.ndarray, language: str = "en") -> str:
+    def _transcribe_mlx(self, audio: np.ndarray, language: str = "en",
+                        initial_prompt: Optional[str] = None) -> str:
         """Transcribe using MLX Whisper."""
         import mlx_whisper
 
@@ -96,21 +100,28 @@ class Transcriber:
             self.model_name = "large-v3"
             mlx_model = self.MLX_MODELS["large-v3"]
 
-        result = mlx_whisper.transcribe(
-            audio,
+        kwargs = dict(
             path_or_hf_repo=mlx_model,
             language=language,
         )
+        if initial_prompt is not None:
+            kwargs["initial_prompt"] = initial_prompt
+
+        result = mlx_whisper.transcribe(audio, **kwargs)
 
         return result.get("text", "").strip()
 
-    def _transcribe_faster_whisper(self, audio: np.ndarray, language: str = "en") -> str:
+    def _transcribe_faster_whisper(self, audio: np.ndarray, language: str = "en",
+                                   initial_prompt: Optional[str] = None) -> str:
         """Transcribe using faster-whisper."""
-        segments, info = self._model.transcribe(
-            audio,
+        kwargs = dict(
             language=language,
             vad_filter=True,
         )
+        if initial_prompt is not None:
+            kwargs["initial_prompt"] = initial_prompt
+
+        segments, info = self._model.transcribe(audio, **kwargs)
 
         text_parts = [segment.text.strip() for segment in segments]
         return " ".join(text_parts).strip()
