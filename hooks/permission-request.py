@@ -85,6 +85,14 @@ def main():
     except Exception:
         pass
 
+    # AskUserQuestion is handled by the PreToolUse hook (handle-ask-user.py).
+    # Return early without output so Claude Code shows the question dialog
+    # normally, while skipping the daemon call that would trigger the
+    # "permission needed" notification chain.
+    if hook_input.get("tool_name") == "AskUserQuestion":
+        debug("Skipping AskUserQuestion (handled by PreToolUse hook)")
+        return
+
     # Build rich prompt with tool details
     prompt = extract_tool_detail(hook_input)
 

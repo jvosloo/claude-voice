@@ -1,8 +1,10 @@
-"""Unit tests for permission-request.py hook — extract_tool_detail()."""
+"""Unit tests for permission-request.py hook — extract_tool_detail() and main()."""
 
 import importlib
+import json
 import os
 import sys
+from unittest.mock import patch, MagicMock
 
 # Import the hook script as a module (it uses polyglot bash/python shebang)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "hooks"))
@@ -14,7 +16,9 @@ _spec = importlib.util.spec_from_file_location(
 )
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
+sys.modules["permission_request"] = _mod
 extract_tool_detail = _mod.extract_tool_detail
+main = _mod.main
 MAX_DETAIL_LENGTH = _mod.MAX_DETAIL_LENGTH
 
 
@@ -107,3 +111,47 @@ class TestExtractToolDetail:
         })
         assert result.startswith("Bash: ")
         assert "something_else" in result
+
+
+class TestAskUserQuestionSkipped:
+    """AskUserQuestion should be skipped (no output) to prevent 'permission needed' audio."""
+
+    def test_ask_user_produces_no_output_in_notify_mode(self, tmp_path, capsys):
+        """AskUserQuestion returns early with no output; daemon is never called."""
+        hook_input = {"tool_name": "AskUserQuestion", "tool_input": {"question": "Pick one"}}
+
+        with patch("permission_request.read_mode", return_value="notify"), \
+             patch("permission_request.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
+             patch("json.load", return_value=hook_input), \
+             patch("permission_request.send_to_daemon") as mock_send:
+            main()
+
+        mock_send.assert_not_called()
+        assert capsys.readouterr().out == ""
+
+    def test_ask_user_produces_no_output_in_afk_mode(self, tmp_path, capsys):
+        """AskUserQuestion returns early with no output in AFK mode too."""
+        hook_input = {"tool_name": "AskUserQuestion", "tool_input": {"question": "Pick one"}}
+
+        with patch("permission_request.read_mode", return_value="afk"), \
+             patch("json.load", return_value=hook_input), \
+             patch("permission_request.send_to_daemon") as mock_send:
+            main()
+
+        mock_send.assert_not_called()
+        assert capsys.readouterr().out == ""
+
+    def test_other_tools_not_affected(self, tmp_path, capsys):
+        """Bash still goes through the normal permission flow (returns 'ask')."""
+        hook_input = {"tool_name": "Bash", "tool_input": {"command": "ls"}}
+
+        with patch("permission_request.read_mode", return_value="notify"), \
+             patch("permission_request.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
+             patch("json.load", return_value=hook_input), \
+             patch("permission_request.check_permission_rules", return_value=None), \
+             patch("permission_request.get_session", return_value="test_session"), \
+             patch("permission_request.send_to_daemon", return_value=None):
+            main()
+
+        output = json.loads(capsys.readouterr().out)
+        assert output["hookSpecificOutput"]["decision"]["behavior"] == "ask"

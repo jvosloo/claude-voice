@@ -36,11 +36,11 @@ def main():
     if os.path.exists(SILENT_FLAG):
         return
 
-    # Skip if AskUserQuestion hook recently set the flag (within 5s).
+    # Skip if AskUserQuestion hook recently set the flag (within 30s).
     # The flag persists on disk; checking age avoids stale flags from
     # blocking future legitimate "permission needed" phrases.
     try:
-        if time.time() - os.path.getmtime(ASK_USER_FLAG) < 5:
+        if time.time() - os.path.getmtime(ASK_USER_FLAG) < 30:
             return
     except OSError:
         pass

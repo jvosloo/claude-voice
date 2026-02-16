@@ -26,7 +26,7 @@ def _make_hook_input(notification_type="permission_prompt"):
 class TestAskUserFlagExpiry:
 
     def test_fresh_flag_skips_notification(self, tmp_path):
-        """When ASK_USER_FLAG exists and is fresh (< 5s), permission hook skips."""
+        """When ASK_USER_FLAG exists and is fresh (< 30s), permission hook skips."""
         flag_path = str(tmp_path / ".ask_user_active")
         with open(flag_path, "w") as f:
             f.write(str(time.time()))
@@ -43,12 +43,12 @@ class TestAskUserFlagExpiry:
         mock_send.assert_not_called()
 
     def test_stale_flag_proceeds_with_notification(self, tmp_path):
-        """When ASK_USER_FLAG exists but is stale (> 5s), permission hook proceeds."""
+        """When ASK_USER_FLAG exists but is stale (> 30s), permission hook proceeds."""
         flag_path = str(tmp_path / ".ask_user_active")
         with open(flag_path, "w") as f:
             f.write(str(time.time()))
-        # Backdate mtime by 10 seconds
-        stale_time = time.time() - 10
+        # Backdate mtime by 35 seconds (must exceed 30s TTL)
+        stale_time = time.time() - 35
         os.utime(flag_path, (stale_time, stale_time))
 
         hook_input = _make_hook_input()
