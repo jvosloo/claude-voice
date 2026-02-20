@@ -103,6 +103,7 @@ class Transcriber:
         kwargs = dict(
             path_or_hf_repo=mlx_model,
             language=language,
+            condition_on_previous_text=False,
         )
         if initial_prompt is not None:
             kwargs["initial_prompt"] = initial_prompt
@@ -117,6 +118,7 @@ class Transcriber:
         kwargs = dict(
             language=language,
             vad_filter=True,
+            condition_on_previous_text=False,
         )
         if initial_prompt is not None:
             kwargs["initial_prompt"] = initial_prompt

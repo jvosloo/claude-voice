@@ -40,6 +40,36 @@ class TestInitialPromptMLX:
         assert "initial_prompt" not in call_kwargs
 
 
+class TestConditionOnPreviousText:
+    """Verify condition_on_previous_text=False is always passed to prevent hallucination loops."""
+
+    @patch("mlx_whisper.transcribe")
+    def test_mlx_disables_condition_on_previous_text(self, mock_transcribe):
+        mock_transcribe.return_value = {"text": "hello"}
+        t = Transcriber(model_name="large-v3-turbo", backend="mlx")
+        t._model = "mlx"
+
+        audio = np.zeros(16000, dtype=np.float32)
+        t.transcribe(audio)
+
+        call_kwargs = mock_transcribe.call_args[1]
+        assert call_kwargs["condition_on_previous_text"] is False
+
+    def test_faster_whisper_disables_condition_on_previous_text(self):
+        t = Transcriber(model_name="base.en", backend="faster-whisper")
+        mock_model = MagicMock()
+        segment = MagicMock()
+        segment.text = "hello"
+        mock_model.transcribe.return_value = ([segment], MagicMock())
+        t._model = mock_model
+
+        audio = np.zeros(16000, dtype=np.float32)
+        t.transcribe(audio)
+
+        call_kwargs = t._model.transcribe.call_args[1]
+        assert call_kwargs["condition_on_previous_text"] is False
+
+
 class TestInitialPromptFasterWhisper:
     """Verify initial_prompt is forwarded to faster-whisper model.transcribe()."""
 
