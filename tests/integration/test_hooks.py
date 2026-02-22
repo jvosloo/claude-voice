@@ -16,27 +16,36 @@ from _common import (
 
 class TestReadMode:
 
-    def test_valid_mode(self, tmp_path):
-        mode_file = tmp_path / ".mode"
-        mode_file.write_text("narrate")
-        with patch("_common.MODE_FILE", str(mode_file)):
-            assert read_mode() == "narrate"
-
-    def test_missing_file_returns_empty(self):
-        with patch("_common.MODE_FILE", "/nonexistent/.mode"):
-            assert read_mode() == ""
-
-    def test_empty_file_returns_empty(self, tmp_path):
-        mode_file = tmp_path / ".mode"
-        mode_file.write_text("")
-        with patch("_common.MODE_FILE", str(mode_file)):
-            assert read_mode() == ""
-
-    def test_afk_mode(self, tmp_path):
+    def test_afk_mode_from_mode_file(self, tmp_path):
+        """AFK mode is read from .mode file."""
         mode_file = tmp_path / ".mode"
         mode_file.write_text("afk")
         with patch("_common.MODE_FILE", str(mode_file)):
             assert read_mode() == "afk"
+
+    def test_non_afk_mode_file_ignored(self, tmp_path):
+        """Non-AFK values in .mode file are ignored; falls back to config.yaml."""
+        mode_file = tmp_path / ".mode"
+        mode_file.write_text("narrate")
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("speech:\n  mode: narrate\n")
+        with patch("_common.MODE_FILE", str(mode_file)):
+            with patch("_common.os.path.expanduser", return_value=str(config_path)):
+                assert read_mode() == "narrate"
+
+    def test_missing_mode_file_reads_config(self, tmp_path):
+        """When .mode file doesn't exist, reads from config.yaml."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("speech:\n  mode: notify\n")
+        with patch("_common.MODE_FILE", "/nonexistent/.mode"):
+            with patch("_common.os.path.expanduser", return_value=str(config_path)):
+                assert read_mode() == "notify"
+
+    def test_missing_config_returns_notify(self):
+        """When both .mode and config.yaml are missing, defaults to 'notify'."""
+        with patch("_common.MODE_FILE", "/nonexistent/.mode"):
+            with patch("_common.os.path.expanduser", return_value="/nonexistent/config.yaml"):
+                assert read_mode() == "notify"
 
 
 class TestSendToDaemon:
