@@ -303,8 +303,9 @@ else
     fi
 fi
 
-# Note: Google Cloud STT is optional (for non-English language backends)
-# Install with: pip install google-cloud-speech
+# Note: Cloud STT is optional (for non-English language backends)
+# OpenAI backend: reuses your existing speech.openai_api_key (no extra deps)
+# Google backend: pip install google-cloud-speech (requires service account)
 # See config.yaml.example for setup instructions
 
 # Install Claude Code hooks

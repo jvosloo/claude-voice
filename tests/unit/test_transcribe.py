@@ -150,6 +150,30 @@ class TestLanguageBackendRouting:
         mock_transcribe.assert_called_once()
         assert result == "toets"
 
+    def test_overridden_language_uses_openai(self):
+        """Afrikaans with openai override routes to OpenAITranscriber."""
+        t = Transcriber(model_name="large-v3-turbo", backend="mlx",
+                        language_backends={"af": {"backend": "openai"}},
+                        openai_api_key="sk-test")
+        t._model = "mlx"
+
+        mock_openai = MagicMock()
+        mock_openai.transcribe.return_value = "hallo wêreld"
+        t._cloud_transcribers = {"af": mock_openai}
+
+        audio = np.zeros(16000, dtype=np.float32)
+        result = t.transcribe(audio, language="af")
+
+        mock_openai.transcribe.assert_called_once()
+        assert result == "hallo wêreld"
+
+    def test_openai_transcriber_lazy_created(self):
+        """OpenAITranscriber is created on first use, not at init."""
+        t = Transcriber(model_name="large-v3-turbo", backend="mlx",
+                        language_backends={"af": {"backend": "openai"}},
+                        openai_api_key="sk-test")
+        assert t._cloud_transcribers == {}
+
     def test_google_transcriber_lazy_created(self):
         """GoogleCloudTranscriber is created on first use, not at init."""
         t = Transcriber(model_name="large-v3-turbo", backend="mlx",

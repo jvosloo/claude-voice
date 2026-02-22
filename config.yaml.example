@@ -19,14 +19,10 @@ transcription:
   # Per-language backend overrides — use a cloud API for specific languages
   # while keeping free local Whisper for English
   # language_backends:
-  #   af:                         # Language code to override
-  #     backend: "google"         # "google" = Google Cloud Speech-to-Text
-  #     google_credentials: "~/.claude-voice/google-credentials.json"
-  #     # Setup: 1) Create project at console.cloud.google.com
-  #     #        2) Enable "Cloud Speech-to-Text API"
-  #     #        3) Create service account key (JSON) and save to path above
-  #     #        4) pip install google-cloud-speech in ~/.claude-voice/venv/
-  #     # Pricing: $0.024/min ($1.44/hr), 60 min/month free tier
+  #   af:                              # Language code to override
+  #     backend: "openai"              # Uses your existing speech.openai_api_key
+  #     # model: "gpt-4o-transcribe"   # or "gpt-4o-mini-transcribe" (cheaper)
+  #     # Pricing: $0.006/min (gpt-4o-transcribe) or $0.003/min (mini)
 
 speech:
   enabled: true                # Set to false to disable TTS output

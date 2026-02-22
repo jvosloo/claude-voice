@@ -146,6 +146,7 @@ class VoiceDaemon:
             device=self.config.transcription.device,
             backend=self.config.transcription.backend,
             language_backends=self.config.transcription.language_backends,
+            openai_api_key=self.config.speech.openai_api_key,
         )
 
         self.keyboard = KeyboardSimulator(
@@ -278,9 +279,14 @@ class VoiceDaemon:
             self.transcriber.device = new.transcription.device
             changed.append("transcriber(device)")
 
-        # Update language_backends (hot-reloadable)
-        if new.transcription.language_backends != old.transcription.language_backends:
+        # Update language_backends and openai_api_key (hot-reloadable)
+        cloud_changed = (
+            new.transcription.language_backends != old.transcription.language_backends
+            or new.speech.openai_api_key != old.speech.openai_api_key
+        )
+        if cloud_changed:
             self.transcriber.language_backends = new.transcription.language_backends
+            self.transcriber.openai_api_key = new.speech.openai_api_key
             self.transcriber._cloud_transcribers = {}  # Force re-creation
             changed.append("transcriber(language_backends)")
 

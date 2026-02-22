@@ -141,10 +141,8 @@ Say these phrases to toggle voice output without leaving Claude:
 |----------|--------|
 | **"Stop speaking"** | Disable voice output |
 | **"Start speaking"** | Enable voice output |
-| **"Switch to notify mode"** | Short status phrases |
-| **"Switch to narrate mode"** | Read full responses aloud |
 
-Also accepts "stop/start talking" and "notification/narration mode".
+Also accepts "stop/start talking".
 
 ### AFK Mode
 
@@ -257,6 +255,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `extra_languages` | `[]` | Additional languages to cycle through (e.g. `["af", "de"]`) |
 | `device` | `cpu` | Compute device for faster-whisper: `cpu` or `cuda` |
 | `word_replacements` | `{}` | Fix consistently misheard words (see below) |
+| `language_backends` | `{}` | Per-language cloud backend overrides (see below) |
 
 **Available models:**
 
@@ -285,6 +284,27 @@ transcription:
 ```
 
 Replacements are applied immediately after transcription, before any LLM cleanup. Changes take effect on the next recording after `reload_config`.
+
+### Cloud Transcription Backends
+
+Route specific languages to a cloud API while keeping English on free local Whisper. Useful when Whisper doesn't support a language well.
+
+```yaml
+transcription:
+  language_backends:
+    af:
+      backend: "openai"              # Reuses your existing speech.openai_api_key
+      # model: "gpt-4o-transcribe"   # or "gpt-4o-mini-transcribe" (cheaper)
+```
+
+**Available backends:**
+
+| Backend | Setup | Pricing |
+|---------|-------|---------|
+| `openai` | Uses existing `speech.openai_api_key` — no extra setup | $0.006/min (gpt-4o-transcribe) or $0.003/min (mini) |
+| `google` | Requires service account JSON + `pip install google-cloud-speech` | $0.024/min, 60 min/month free tier |
+
+Languages not listed in `language_backends` use the local Whisper model (free). The config hot-reloads without a daemon restart.
 
 ### Input Settings
 

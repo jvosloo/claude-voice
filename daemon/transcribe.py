@@ -32,13 +32,14 @@ class Transcriber:
     }
 
     def __init__(self, model_name: str = "base.en", device: str = "cpu", backend: str = "faster-whisper",
-                 language_backends: dict = None):
+                 language_backends: dict = None, openai_api_key: str = ""):
         self.model_name = model_name
         self.device = device
         self.backend = backend
         self._model = None
         self._model_dir = os.path.expanduser("~/.claude-voice/models/whisper")
         self.language_backends = language_backends or {}
+        self.openai_api_key = openai_api_key
         self._cloud_transcribers = {}
 
     def _ensure_model(self):
@@ -99,7 +100,13 @@ class Transcriber:
         if language not in self._cloud_transcribers:
             config = self.language_backends[language]
             backend = config.get("backend")
-            if backend == "google":
+            if backend == "openai":
+                from daemon.transcribe_openai import OpenAITranscriber
+                self._cloud_transcribers[language] = OpenAITranscriber(
+                    api_key=self.openai_api_key,
+                    model=config.get("model", "gpt-4o-transcribe"),
+                )
+            elif backend == "google":
                 from daemon.transcribe_google import GoogleCloudTranscriber
                 self._cloud_transcribers[language] = GoogleCloudTranscriber(
                     credentials_path=config["google_credentials"]

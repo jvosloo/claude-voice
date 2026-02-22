@@ -10,7 +10,7 @@ sys.modules.setdefault('sounddevice', MagicMock())
 sys.modules.setdefault('pynput', MagicMock())
 sys.modules.setdefault('pynput.keyboard', MagicMock())
 
-from daemon.main import VoiceDaemon, _read_mode, _write_mode, SILENT_FLAG, MODE_FILE
+from daemon.main import VoiceDaemon, _read_mode, SILENT_FLAG, MODE_FILE
 
 
 class TestHandleVoiceCommand:
@@ -55,26 +55,6 @@ class TestHandleVoiceCommand:
         silent.touch()
         with patch("daemon.main.SILENT_FLAG", str(silent)):
             assert d._handle_voice_command("start talking") is True
-
-    def test_switch_to_narrate(self, tmp_path):
-        d = self._make_daemon()
-        mode_file = tmp_path / ".mode"
-        with patch("daemon.main.MODE_FILE", str(mode_file)):
-            with patch("daemon.main._write_mode") as mock_write:
-                assert d._handle_voice_command("switch to narrate mode") is True
-                mock_write.assert_called_once_with("narrate")
-
-    def test_switch_to_notify(self, tmp_path):
-        d = self._make_daemon()
-        with patch("daemon.main._write_mode") as mock_write:
-            assert d._handle_voice_command("switch to notify mode") is True
-            mock_write.assert_called_once_with("notify")
-
-    def test_switch_to_narration_mode(self, tmp_path):
-        d = self._make_daemon()
-        with patch("daemon.main._write_mode") as mock_write:
-            assert d._handle_voice_command("switch to narration mode") is True
-            mock_write.assert_called_once_with("narrate")
 
     def test_afk_activate_command(self):
         d = self._make_daemon()
