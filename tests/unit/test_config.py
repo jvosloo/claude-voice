@@ -123,3 +123,42 @@ def test_done_phrase_text():
 
 def test_question_phrase_text():
     assert DEFAULT_NOTIFY_PHRASES["question"] == "Please choose an option"
+
+
+class TestLanguageBackends:
+
+    def test_language_backends_default_empty(self):
+        """No language_backends configured by default."""
+        with patch("daemon.config.os.path.exists", return_value=False):
+            cfg = load_config()
+        assert cfg.transcription.language_backends == {}
+
+    def test_language_backends_parsed_from_yaml(self):
+        yaml_content = """
+transcription:
+  language_backends:
+    af:
+      backend: "google"
+      google_credentials: "~/.claude-voice/google-creds.json"
+"""
+        with patch("daemon.config.os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=yaml_content)):
+                cfg = load_config()
+        assert cfg.transcription.language_backends == {
+            "af": {
+                "backend": "google",
+                "google_credentials": "~/.claude-voice/google-creds.json",
+            }
+        }
+
+    def test_language_backends_ignored_when_absent(self):
+        """Existing configs without language_backends still work."""
+        yaml_content = """
+transcription:
+  model: "large-v3-turbo"
+  language: "en"
+"""
+        with patch("daemon.config.os.path.exists", return_value=True):
+            with patch("builtins.open", mock_open(read_data=yaml_content)):
+                cfg = load_config()
+        assert cfg.transcription.language_backends == {}

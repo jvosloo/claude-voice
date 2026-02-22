@@ -24,6 +24,7 @@ class TranscriptionConfig:
     backend: str = "mlx"  # "faster-whisper" or "mlx"
     extra_languages: list = field(default_factory=list)
     word_replacements: dict = field(default_factory=lambda: {"clawd": "Claude"})
+    language_backends: dict = field(default_factory=dict)
 
 DEFAULT_NOTIFY_PHRASES = {
     "permission": "Permission needed",
