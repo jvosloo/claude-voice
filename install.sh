@@ -303,6 +303,10 @@ else
     fi
 fi
 
+# Note: Google Cloud STT is optional (for non-English language backends)
+# Install with: pip install google-cloud-speech
+# See config.yaml.example for setup instructions
+
 # Install Claude Code hooks
 echo "Installing Claude Code hooks..."
 cp "$SCRIPT_DIR/hooks/speak-response.py" "$CLAUDE_HOOKS_DIR/"

@@ -16,6 +16,17 @@ transcription:
   word_replacements:              # Fix consistently misheard words (case-insensitive, whole-word)
     "clawd": "Claude"             # Key = what Whisper hears, Value = what you actually said
     # "clothes code": "Claude Code"
+  # Per-language backend overrides — use a cloud API for specific languages
+  # while keeping free local Whisper for English
+  # language_backends:
+  #   af:                         # Language code to override
+  #     backend: "google"         # "google" = Google Cloud Speech-to-Text
+  #     google_credentials: "~/.claude-voice/google-credentials.json"
+  #     # Setup: 1) Create project at console.cloud.google.com
+  #     #        2) Enable "Cloud Speech-to-Text API"
+  #     #        3) Create service account key (JSON) and save to path above
+  #     #        4) pip install google-cloud-speech in ~/.claude-voice/venv/
+  #     # Pricing: $0.024/min ($1.44/hr), 60 min/month free tier
 
 speech:
   enabled: true                # Set to false to disable TTS output
