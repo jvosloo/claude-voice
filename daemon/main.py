@@ -145,6 +145,7 @@ class VoiceDaemon:
             model_name=self.config.transcription.model,
             device=self.config.transcription.device,
             backend=self.config.transcription.backend,
+            language_backends=self.config.transcription.language_backends,
         )
 
         self.keyboard = KeyboardSimulator(
@@ -276,6 +277,12 @@ class VoiceDaemon:
         elif new.transcription.device != old.transcription.device:
             self.transcriber.device = new.transcription.device
             changed.append("transcriber(device)")
+
+        # Update language_backends (hot-reloadable)
+        if new.transcription.language_backends != old.transcription.language_backends:
+            self.transcriber.language_backends = new.transcription.language_backends
+            self.transcriber._cloud_transcribers = {}  # Force re-creation
+            changed.append("transcriber(language_backends)")
 
         # ResponseSummarizer: recreate if model changed
         if (new.speech.summarize_model != old.speech.summarize_model
