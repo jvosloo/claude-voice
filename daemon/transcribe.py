@@ -31,12 +31,15 @@ class Transcriber:
         "large-v3-turbo": "mlx-community/whisper-large-v3-turbo",
     }
 
-    def __init__(self, model_name: str = "base.en", device: str = "cpu", backend: str = "faster-whisper"):
+    def __init__(self, model_name: str = "base.en", device: str = "cpu", backend: str = "faster-whisper",
+                 language_backends: dict = None):
         self.model_name = model_name
         self.device = device
         self.backend = backend
         self._model = None
         self._model_dir = os.path.expanduser("~/.claude-voice/models/whisper")
+        self.language_backends = language_backends or {}
+        self._cloud_transcribers = {}
 
     def _ensure_model(self):
         """Lazy-load the Whisper model."""
@@ -75,6 +78,10 @@ class Transcriber:
         if len(audio) == 0:
             return ""
 
+        # Check for per-language backend override
+        if language in self.language_backends:
+            return self._transcribe_cloud(audio, language=language, sample_rate=sample_rate)
+
         self._ensure_model()
 
         # Whisper expects float32 audio normalized to [-1, 1]
@@ -85,6 +92,27 @@ class Transcriber:
             return self._transcribe_mlx(audio, language=language, initial_prompt=initial_prompt)
         else:
             return self._transcribe_faster_whisper(audio, language=language, initial_prompt=initial_prompt)
+
+    def _transcribe_cloud(self, audio: np.ndarray, language: str,
+                          sample_rate: int = 16000) -> str:
+        """Route to cloud transcription backend for this language."""
+        if language not in self._cloud_transcribers:
+            config = self.language_backends[language]
+            backend = config.get("backend")
+            if backend == "google":
+                from daemon.transcribe_google import GoogleCloudTranscriber
+                self._cloud_transcribers[language] = GoogleCloudTranscriber(
+                    credentials_path=config["google_credentials"]
+                )
+            else:
+                print(f"WARNING: Unknown cloud backend '{backend}' for language '{language}', "
+                      f"falling back to local Whisper")
+                del self.language_backends[language]
+                return self.transcribe(audio, sample_rate=sample_rate, language=language)
+
+        return self._cloud_transcribers[language].transcribe(
+            audio, language=language, sample_rate=sample_rate
+        )
 
     def _transcribe_mlx(self, audio: np.ndarray, language: str = "en",
                         initial_prompt: Optional[str] = None) -> str:
