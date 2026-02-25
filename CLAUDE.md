@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Claude Voice is a macOS daemon providing push-to-talk voice input and bidirectional voice output for Claude Code. It transcribes speech via Whisper, types it into the focused app, and speaks Claude's responses via Kokoro TTS. An AFK mode enables remote interaction through Telegram.
+Claude Voice is a macOS daemon providing push-to-talk voice input and bidirectional voice output for Claude Code. It transcribes speech via Whisper, types it into the focused app, and speaks Claude's responses via Kokoro TTS.
 
 **Platform:** macOS only (Apple Silicon recommended). Uses `afplay` for audio playback, PyObjC for the overlay UI.
 
@@ -50,7 +50,7 @@ Communication via Unix sockets:
 ### Threading Model
 
 - **Main thread:** Cocoa NSRunLoop for overlay — all NSWindow/NSView operations must happen here
-- **Background threads:** TTS socket server, control server, hotkey listener, Telegram long-polling
+- **Background threads:** TTS socket server, control server, hotkey listener
 - Threading locks protect shared state (audio chunks, events)
 
 ### Hooks (`hooks/`)
@@ -59,11 +59,11 @@ Installed to `~/.claude/hooks/` by the installer. Hook-to-event mapping:
 
 | Script | Claude Code Event | Role |
 |--------|------------------|------|
-| `speak-response.py` | Stop | TTS; in AFK mode, blocks for Telegram follow-up |
-| `permission-request.py` | PermissionRequest | Checks stored rules; programmatic allow/deny in AFK; "ask" otherwise |
-| `notify-permission.py` | Notification (`permission_prompt`) | Audio cue; no-op in AFK |
-| `handle-ask-user.py` | PreToolUse (`AskUserQuestion`) | Plays "question" phrase + sets flag in notify; forwards to Telegram in AFK |
-| `_common.py` | — | Shared paths, utilities, `get_session()`, `wait_for_response()` |
+| `speak-response.py` | Stop | Sends response text to daemon for TTS |
+| `permission-request.py` | PermissionRequest | Checks stored permission rules; returns allow or ask |
+| `notify-permission.py` | Notification (`permission_prompt`) | Plays "permission needed" audio cue |
+| `handle-ask-user.py` | PreToolUse (`AskUserQuestion`) | Plays "question" phrase + sets flag |
+| `_common.py` | — | Shared paths, utilities, `get_session()` |
 
 ### Configuration
 
@@ -72,19 +72,17 @@ YAML at `~/.claude-voice/config.yaml` (see `config.yaml.example`). Hot-reloads w
 ### State Files (all in `~/.claude-voice/`)
 
 - `.silent` — flag file disabling voice output
-- `.mode` — AFK mode flag (only written when AFK is active; notify/narrate come from `config.yaml`)
 - `daemon.pid` — daemon process ID
-- `permission_rules.json` — stored "always allow" rules from AFK mode
+- `permission_rules.json` — stored "always allow" permission rules
 
 Temporary state (in `/tmp/claude-voice/`):
-- `.ask_user_active` — flag for AskUserQuestion in progress (suppresses "permission needed" phrase in notify/AFK)
-- `sessions/<session>/response_stop` — response file for Stop hook blocking
+- `.ask_user_active` — flag for AskUserQuestion in progress (suppresses "permission needed" phrase)
 
 ### Debug Logs (in `/tmp/claude-voice/logs/`)
 
 - `permission_hook.log` — permission hook debug trace
 - `permission_hook_input.json` — last raw hook input JSON
-- `stop_hook.log` — Stop hook debug trace (AFK blocking, follow-up delivery)
+- `stop_hook.log` — Stop hook debug trace
 - `ask-user-debug.log` — AskUserQuestion hook debug trace
 - `hook_errors.log` — general hook error log (all hooks)
 
@@ -96,9 +94,7 @@ Temporary state (in `/tmp/claude-voice/`):
 ## Key Patterns
 
 - **Hooks fail silently:** if the daemon isn't running, hooks exit gracefully rather than erroring
-- **AFK permission flow:** Two hooks handle permissions: `permission-request.py` (PermissionRequest) fires *before* the dialog; `notify-permission.py` (Notification) fires *after*. In AFK mode, PermissionRequest handles everything so the dialog never appears
-- **AFK follow-up flow:** The Stop hook blocks in AFK mode, waits for a Telegram message, then returns a "block" decision with the message as reason. The `/back` command writes a `__back__` sentinel to unblock all waiting hooks
-- **Atomic file IPC:** `_write_response` uses `tempfile.mkstemp` + `os.rename` for atomic handoff. Never use bare `open(path, "w")` for response files — the polling hook could read a partial write
+- **Permission flow:** Two hooks handle permissions: `permission-request.py` (PermissionRequest) fires *before* the dialog to check stored rules; `notify-permission.py` (Notification) fires *after* to play the audio cue
 - **PortAudio retry:** AudioRecorder has retry logic with backoff for macOS AUHAL error -50
 
 ## Settings App Coordination
@@ -125,7 +121,7 @@ Commands sent as JSON over `~/.claude-voice/.control.sock`:
 | stop            | `{"cmd": "stop"}`                         | `{"ok": true}` — graceful shutdown                            |
 | subscribe       | `{"cmd": "subscribe"}`                    | streams newline-delimited JSON events                         |
 
-Status response fields: `daemon` (always true), `mode` (notify/narrate/afk), `voice` (output enabled), `recording` (mic active), `ready` (fully initialized).
+Status response fields: `daemon` (always true), `mode` (notify/narrate), `voice` (output enabled), `recording` (mic active), `ready` (fully initialized).
 
 ## Deployment
 
@@ -140,4 +136,4 @@ The daemon runs from `~/.claude-voice/`, not this repo. Run `./deploy.sh` after 
 - **Notify phrases are cached .wav files:** When voice/speed/lang_code changes, `regenerate_custom_phrases` must be called. `reload_config` handles this automatically.
 - **Check crash reports:** macOS crash logs at `~/Library/Logs/DiagnosticReports/python3.13-*.ips` — useful when ObjC exceptions kill the process without a Python traceback.
 - **settings.json hooks must be surgical:** install.sh and uninstall.sh identify claude-voice hooks by command path, not category name. Other tools may share hook categories. Always filter by `is_cv_hook()` — never overwrite or delete an entire category.
-- **No osascript/AppleScript:** The project doesn't use Terminal.app or System Events automation. AFK follow-ups route through Stop hook blocking, not terminal injection.
+- **No osascript/AppleScript:** The project doesn't use Terminal.app or System Events automation.

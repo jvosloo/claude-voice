@@ -153,7 +153,7 @@ chmod +x "$INSTALL_DIR/claude-voice-daemon"
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     echo "Creating default config..."
     cp "$SCRIPT_DIR/config.yaml.example" "$INSTALL_DIR/config.yaml"
-    # Set restrictive permissions (config may contain Telegram credentials)
+    # Set restrictive permissions (config may contain API keys)
     chmod 600 "$INSTALL_DIR/config.yaml"
 else
     echo "Keeping existing config.yaml"
@@ -481,23 +481,6 @@ echo ""
 echo "Notify mode plays short status phrases instead of reading responses aloud."
 echo "Error detection uses Claude Code hooks (no LLM required)."
 echo "Switch at runtime with voice command: 'switch to notify mode'"
-echo ""
-
-# AFK mode info
-echo "=================================="
-echo "AFK Mode"
-echo "=================================="
-echo ""
-echo "AFK mode lets you handle Claude Code permissions and questions remotely"
-echo "via Telegram, and send new prompts to idle sessions while away from your desk."
-echo ""
-echo "To set up AFK mode, add your Telegram bot token and chat ID to:"
-echo "  ~/.claude-voice/config.yaml"
-echo ""
-echo "  afk:"
-echo "    telegram:"
-echo "      bot_token: \"your-bot-token\""
-echo "      chat_id: \"your-chat-id\""
 echo ""
 
 # Add shell aliases (only on fresh install)
