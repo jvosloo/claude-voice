@@ -9,15 +9,8 @@ import time
 
 # Shared paths
 TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
-MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
 ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
-AFK_RESPONSE_TIMEOUT = 10800  # 3 hours — hooks block while user is AFK
-
-# How often hooks poll for response files (seconds).
-# Lower = less latency after Telegram reply, higher = less CPU.
-# 1s is a good balance: imperceptible delay for a human, negligible CPU.
-POLL_INTERVAL = 1
 
 _ERROR_LOG = os.path.expanduser("/tmp/claude-voice/logs/hook_errors.log")
 
@@ -74,26 +67,8 @@ def get_session(hook_input: dict | None = None) -> str:
     return project
 
 
-def send_to_daemon(payload: dict, with_context: bool = False, raw_text: str = "",
-                   hook_input: dict | None = None) -> dict | None:
-    """Send JSON to daemon and receive a JSON response.
-
-    Args:
-        payload: JSON payload to send.
-        with_context: If True, add session/context fields for AFK routing.
-        raw_text: Original unprocessed text (used for context extraction).
-        hook_input: Raw hook input JSON (used to extract session_id).
-    """
-    if with_context:
-        session = get_session(hook_input)
-        source = raw_text or payload.get("text", "")
-        context_lines = source.strip().split("\n")[-10:] if source else []
-        payload = {
-            **payload,
-            "session": session,
-            "context": "\n".join(context_lines),
-            "type": "context",
-        }
+def send_to_daemon(payload: dict) -> dict | None:
+    """Send JSON to daemon and receive a JSON response."""
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(10)
@@ -114,52 +89,6 @@ def send_to_daemon(payload: dict, with_context: bool = False, raw_text: str = ""
     except Exception as e:
         log_error("send_to_daemon", e)
     return None
-
-
-def wait_for_response(response_path: str, timeout: float | None = None) -> str | None:
-    """Poll for a response file. Returns response text or None on timeout."""
-    deadline = time.time() + (timeout if timeout is not None else AFK_RESPONSE_TIMEOUT)
-    while time.time() < deadline:
-        if os.path.exists(response_path):
-            try:
-                with open(response_path) as f:
-                    response = f.read().strip()
-            except OSError:
-                continue  # File not ready yet
-            try:
-                os.remove(response_path)
-            except OSError:
-                pass  # Will be cleaned up later
-            return response
-        time.sleep(POLL_INTERVAL)
-    return None
-
-
-def read_mode() -> str:
-    """Read the current TTS mode.
-
-    Returns 'afk' if in AFK mode, otherwise reads from config.yaml.
-    The mode file only exists when AFK mode is active.
-    """
-    # Check for AFK mode first (stored in mode file)
-    if os.path.exists(MODE_FILE):
-        try:
-            with open(MODE_FILE) as f:
-                mode = f.read().strip()
-            if mode == "afk":
-                return "afk"
-        except (OSError, ValueError):
-            pass
-
-    # Otherwise read from config
-    try:
-        import yaml
-        config_path = os.path.expanduser("~/.claude-voice/config.yaml")
-        with open(config_path) as f:
-            data = yaml.safe_load(f) or {}
-        return data.get("speech", {}).get("mode", "notify")
-    except Exception:
-        return "notify"
 
 
 PERMISSION_RULES_FILE = os.path.expanduser("~/.claude-voice/permission_rules.json")
