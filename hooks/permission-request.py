@@ -1,27 +1,19 @@
 #!/bin/bash
 # -*- mode: python -*-
 ''''exec "$HOME/.claude-voice/venv/bin/python3" "$0" "$@" # '''
-"""Claude Code PermissionRequest hook for AFK mode.
+"""Claude Code PermissionRequest hook.
 
-Intercepts permission requests to route through Telegram for approval.
-Returns JSON decision (allow/deny) instead of keyboard simulation.
-
-In AFK mode: sends rich prompt (tool name + command detail) to Telegram,
-waits for user response, returns programmatic allow/deny.
-In non-AFK mode: returns "ask" so the normal permission dialog appears.
+Checks stored permission rules for auto-approval, otherwise returns "ask"
+so the normal permission dialog appears.
 """
 
 import json
 import os
 import sys
-import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import (
-    send_to_daemon, wait_for_response, make_debug_logger, read_mode,
-    SILENT_FLAG, store_permission_rule, check_permission_rules, get_session,
-)
+from _common import make_debug_logger, check_permission_rules
 
 debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/permission_hook.log"))
 
@@ -59,16 +51,6 @@ def extract_tool_detail(hook_input: dict) -> str:
 
 
 def main():
-    # Check mode
-    mode = read_mode()
-
-    if mode not in ("notify", "afk"):
-        return
-
-    # Check if silent (but not in AFK mode - AFK overrides silent)
-    if mode != "afk" and os.path.exists(SILENT_FLAG):
-        return
-
     # Read hook input
     try:
         hook_input = json.load(sys.stdin)
@@ -98,7 +80,7 @@ def main():
 
     debug(f"Permission request: {prompt}")
 
-    # Check permission rules first
+    # Check permission rules — auto-approve if a stored rule matches
     rule_decision = check_permission_rules(prompt)
     if rule_decision:
         debug(f"Auto-approved by rule: {rule_decision}")
@@ -111,60 +93,15 @@ def main():
         print(json.dumps(output))
         return
 
-    session = get_session(hook_input)
-
-    # Send to daemon
-    debug("Sending to daemon...")
-    response = send_to_daemon({
-        "session": session,
-        "type": "permission",
-        "prompt": prompt,
-    })
-    debug(f"Daemon response: {response}")
-
-    # Default: ask (show local permission dialog)
-    decision = "ask"
-
-    # If daemon says to wait (AFK mode), poll for response
-    if response and response.get("wait"):
-        response_path = response.get("response_path", "")
-        debug(f"Waiting for response at: {response_path}")
-        if response_path:
-            answer = wait_for_response(response_path)
-            debug(f"Got answer: {answer!r}")
-
-            if answer:
-                answer_lower = answer.lower()
-
-                if answer_lower in ("always",):
-                    decision = "allow"
-                    store_permission_rule(prompt)
-                    debug("Stored 'always allow' rule")
-
-                elif answer_lower in ("yes", "y"):
-                    decision = "allow"
-                    debug("Allowing once")
-
-                elif answer_lower in ("no", "n", "deny"):
-                    decision = "deny"
-                    debug("Denying")
-
-                elif answer == "deny_for_question":
-                    # User asked a question, deny so Claude can explain
-                    decision = "deny"
-                    debug("Denying (user asked question)")
-            else:
-                debug("No answer received (timeout)")
-
-    # Return programmatic decision
+    # No rule matched — show local permission dialog
     output = {
         "hookSpecificOutput": {
             "hookEventName": "PermissionRequest",
-            "decision": {"behavior": decision}
+            "decision": {"behavior": "ask"}
         }
     }
 
-    debug(f"Returning decision: {decision}")
+    debug("Returning decision: ask")
     print(json.dumps(output))
 
 
