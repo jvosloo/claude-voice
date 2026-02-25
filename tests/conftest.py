@@ -18,7 +18,6 @@ def sample_config_dict():
         "speech": {"enabled": True, "mode": "notify", "voice": "af_heart"},
         "audio": {"sample_rate": 16000},
         "overlay": {"enabled": False},
-        "afk": {},
     }
 
 
