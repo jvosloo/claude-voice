@@ -11,9 +11,7 @@ import time
 
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
-from _common import SILENT_FLAG, send_to_daemon, read_mode, wait_for_response, AFK_RESPONSE_TIMEOUT, make_debug_logger, get_session
-
-debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/stop_hook.log"))
+from _common import SILENT_FLAG, send_to_daemon
 
 # Paths
 CONFIG_PATH = os.path.expanduser("~/.claude-voice/config.yaml")
@@ -158,11 +156,9 @@ def main():
 
     # Check if TTS is enabled (config or silent flag)
     if not config.get('enabled', True):
-        if read_mode() != "afk":
-            return
+        return
     if os.path.exists(SILENT_FLAG):
-        if read_mode() != "afk":
-            return
+        return
 
     # Extract and clean the last response
     raw_text = extract_last_assistant_message(
@@ -174,37 +170,13 @@ def main():
     if not text:
         return
 
-    # Send to daemon (with session context for AFK routing)
-    response = send_to_daemon({
+    # Send to daemon for TTS playback
+    send_to_daemon({
         "text": text,
-        "raw_text": raw_text,
         "voice": config.get("voice", "af_heart"),
         "speed": config.get("speed", 1.0),
         "lang_code": config.get("lang_code", "a"),
-    }, with_context=True, raw_text=raw_text, hook_input=hook_input)
-
-    # In AFK mode, block waiting for a follow-up message from Telegram
-    if not response or not response.get("wait"):
-        return
-
-    response_path = response.get("response_path", "")
-    if not response_path:
-        return
-
-    debug(f"AFK: blocking for follow-up at {response_path}")
-    answer = wait_for_response(response_path, timeout=AFK_RESPONSE_TIMEOUT)
-
-    if not answer or answer in ("__back__", "__timeout__", "__flush__"):
-        debug(f"AFK: unblocked with sentinel: {answer!r}")
-        return
-
-    # Return a Stop hook "block" decision -- Claude continues with this message
-    debug(f"AFK: forwarding Telegram message to Claude: {answer[:100]!r}")
-    output = {
-        "decision": "block",
-        "reason": f"The user sent this follow-up message via Telegram while in AFK mode: {answer}"
-    }
-    print(json.dumps(output))
+    })
 
 if __name__ == "__main__":
     main()
