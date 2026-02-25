@@ -9,43 +9,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "hooks"))
 from unittest.mock import patch, MagicMock
 
 from _common import (
-    log_error, read_mode, send_to_daemon, wait_for_response,
+    log_error, send_to_daemon,
     load_permission_rules, store_permission_rule, check_permission_rules,
 )
-
-
-class TestReadMode:
-
-    def test_afk_mode_from_mode_file(self, tmp_path):
-        """AFK mode is read from .mode file."""
-        mode_file = tmp_path / ".mode"
-        mode_file.write_text("afk")
-        with patch("_common.MODE_FILE", str(mode_file)):
-            assert read_mode() == "afk"
-
-    def test_non_afk_mode_file_ignored(self, tmp_path):
-        """Non-AFK values in .mode file are ignored; falls back to config.yaml."""
-        mode_file = tmp_path / ".mode"
-        mode_file.write_text("narrate")
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text("speech:\n  mode: narrate\n")
-        with patch("_common.MODE_FILE", str(mode_file)):
-            with patch("_common.os.path.expanduser", return_value=str(config_path)):
-                assert read_mode() == "narrate"
-
-    def test_missing_mode_file_reads_config(self, tmp_path):
-        """When .mode file doesn't exist, reads from config.yaml."""
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text("speech:\n  mode: notify\n")
-        with patch("_common.MODE_FILE", "/nonexistent/.mode"):
-            with patch("_common.os.path.expanduser", return_value=str(config_path)):
-                assert read_mode() == "notify"
-
-    def test_missing_config_returns_notify(self):
-        """When both .mode and config.yaml are missing, defaults to 'notify'."""
-        with patch("_common.MODE_FILE", "/nonexistent/.mode"):
-            with patch("_common.os.path.expanduser", return_value="/nonexistent/config.yaml"):
-                assert read_mode() == "notify"
 
 
 class TestSendToDaemon:
@@ -55,64 +21,8 @@ class TestSendToDaemon:
             result = send_to_daemon({"cmd": "status"})
         assert result is None
 
-    def test_with_context_adds_session_fields(self):
-        """with_context=True enriches the payload with session, tty, context."""
-        sent_data = {}
-
-        def mock_connect(self, path):
-            raise ConnectionRefusedError("no daemon")
-
-        def mock_sendall(self, data):
-            sent_data["payload"] = json.loads(data.decode())
-
-        # Patch socket to capture what would be sent, then fail on connect
-        # We can't capture the payload this way since connect fails first.
-        # Instead, test the payload construction by patching at a lower level.
-        with patch("_common.TTS_SOCK_PATH", "/nonexistent/sock"):
-            # Call with_context — it will fail to connect, but the payload
-            # construction happens before the socket call
-            result = send_to_daemon(
-                {"text": "hello world", "voice": "af_heart"},
-                with_context=True,
-                raw_text="line one\nline two\nline three",
-            )
-        assert result is None  # connection refused, but no crash
-
-    def test_with_context_payload_construction(self):
-        """Verify the payload is correctly enriched before sending."""
-        import socket as socket_mod
-
-        captured = {}
-
-        class FakeSocket:
-            def __init__(self, *a, **kw): pass
-            def connect(self, path): pass
-            def settimeout(self, timeout): pass
-            def sendall(self, data):
-                captured["payload"] = json.loads(data.decode())
-            def shutdown(self, how): pass
-            def recv(self, size): return b""
-            def close(self): pass
-
-        with patch("_common.socket.socket", FakeSocket):
-            send_to_daemon(
-                {"text": "test message", "voice": "af_heart"},
-                with_context=True,
-                raw_text="context line 1\ncontext line 2",
-            )
-
-        payload = captured["payload"]
-        assert payload["text"] == "test message"
-        assert payload["voice"] == "af_heart"
-        assert payload["type"] == "context"
-        assert "session" in payload
-        assert "context line 1" in payload["context"]
-        assert "context line 2" in payload["context"]
-
-    def test_without_context_sends_plain_payload(self):
-        """with_context=False (default) sends the payload as-is."""
-        import socket as socket_mod
-
+    def test_sends_plain_payload(self):
+        """send_to_daemon sends the payload dict as-is."""
         captured = {}
 
         class FakeSocket:
@@ -130,33 +40,6 @@ class TestSendToDaemon:
 
         payload = captured["payload"]
         assert payload == {"notify_category": "permission"}
-        assert "session" not in payload
-
-    def test_context_uses_raw_text_for_context_lines(self):
-        """When raw_text is provided, context lines come from it, not text."""
-        captured = {}
-
-        class FakeSocket:
-            def __init__(self, *a, **kw): pass
-            def connect(self, path): pass
-            def settimeout(self, timeout): pass
-            def sendall(self, data):
-                captured["payload"] = json.loads(data.decode())
-            def shutdown(self, how): pass
-            def recv(self, size): return b""
-            def close(self): pass
-
-        with patch("_common.socket.socket", FakeSocket):
-            send_to_daemon(
-                {"text": "cleaned text"},
-                with_context=True,
-                raw_text="raw line A\nraw line B",
-            )
-
-        context = captured["payload"]["context"]
-        assert "raw line A" in context
-        assert "raw line B" in context
-        assert "cleaned text" not in context
 
     def test_unexpected_error_calls_log_error(self):
         """Exceptions beyond ConnectionRefused are logged, not silently swallowed."""
@@ -178,33 +61,6 @@ class TestSendToDaemon:
         mock_log.assert_called_once()
         assert mock_log.call_args[0][0] == "send_to_daemon"
         assert isinstance(mock_log.call_args[0][1], TypeError)
-
-
-class TestWaitForResponse:
-
-    def test_returns_response_when_file_appears(self, tmp_path):
-        resp_file = tmp_path / "response"
-        resp_file.write_text("yes")
-
-        result = wait_for_response(str(resp_file))
-        assert result == "yes"
-        assert not resp_file.exists()  # file removed after read
-
-    def test_timeout_returns_none(self, tmp_path):
-        with patch("_common.AFK_RESPONSE_TIMEOUT", 0.1):
-            with patch("_common.time.sleep"):  # don't actually sleep
-                result = wait_for_response(str(tmp_path / "never"))
-        assert result is None
-
-    def test_returns_response_even_if_remove_fails(self, tmp_path):
-        """Response is returned even if os.remove raises OSError."""
-        resp_file = tmp_path / "response"
-        resp_file.write_text("allow")
-
-        with patch("os.remove", side_effect=OSError("permission denied")):
-            result = wait_for_response(str(resp_file))
-
-        assert result == "allow"
 
 
 class TestLogError:

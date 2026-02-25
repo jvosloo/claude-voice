@@ -10,7 +10,7 @@ sys.modules.setdefault('sounddevice', MagicMock())
 sys.modules.setdefault('pynput', MagicMock())
 sys.modules.setdefault('pynput.keyboard', MagicMock())
 
-from daemon.main import VoiceDaemon, _read_mode, SILENT_FLAG, MODE_FILE
+from daemon.main import VoiceDaemon, _read_mode, SILENT_FLAG
 
 
 class TestHandleVoiceCommand:
@@ -21,14 +21,7 @@ class TestHandleVoiceCommand:
         """Create a VoiceDaemon with mocked dependencies."""
         with patch.object(VoiceDaemon, '__init__', lambda self: None):
             d = VoiceDaemon()
-            # Set up minimal attributes needed by _handle_voice_command
             d.config = MagicMock()
-            d.config.afk.voice_commands_activate = ["going afk", "away from keyboard"]
-            d.config.afk.voice_commands_deactivate = ["back at keyboard", "i'm back"]
-            d.afk = MagicMock()
-            # Mock AFK methods to avoid side effects (file I/O, cues, overlay)
-            d._activate_afk = MagicMock()
-            d._deactivate_afk = MagicMock()
             return d
 
     def test_stop_speaking(self, tmp_path):
@@ -55,16 +48,6 @@ class TestHandleVoiceCommand:
         silent.touch()
         with patch("daemon.main.SILENT_FLAG", str(silent)):
             assert d._handle_voice_command("start talking") is True
-
-    def test_afk_activate_command(self):
-        d = self._make_daemon()
-        assert d._handle_voice_command("going afk") is True
-        d._activate_afk.assert_called_once()
-
-    def test_afk_deactivate_command(self):
-        d = self._make_daemon()
-        assert d._handle_voice_command("i'm back") is True
-        d._deactivate_afk.assert_called_once()
 
     def test_unrecognised_text_returns_false(self):
         d = self._make_daemon()

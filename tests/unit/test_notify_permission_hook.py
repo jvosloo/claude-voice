@@ -33,8 +33,7 @@ class TestAskUserFlagExpiry:
 
         hook_input = _make_hook_input()
 
-        with patch("notify_permission.read_mode", return_value="notify"), \
-             patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
+        with patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
              patch("notify_permission.ASK_USER_FLAG", flag_path), \
              patch("json.load", return_value=hook_input), \
              patch("notify_permission.send_to_daemon") as mock_send:
@@ -53,8 +52,7 @@ class TestAskUserFlagExpiry:
 
         hook_input = _make_hook_input()
 
-        with patch("notify_permission.read_mode", return_value="notify"), \
-             patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
+        with patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
              patch("notify_permission.ASK_USER_FLAG", flag_path), \
              patch("json.load", return_value=hook_input), \
              patch("notify_permission.get_session", return_value="test_session"), \
@@ -70,8 +68,7 @@ class TestAskUserFlagExpiry:
         flag_path = str(tmp_path / ".ask_user_active_nonexistent")
         hook_input = _make_hook_input()
 
-        with patch("notify_permission.read_mode", return_value="notify"), \
-             patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
+        with patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
              patch("notify_permission.ASK_USER_FLAG", flag_path), \
              patch("json.load", return_value=hook_input), \
              patch("notify_permission.get_session", return_value="test_session"), \
@@ -82,20 +79,11 @@ class TestAskUserFlagExpiry:
         sent = mock_send.call_args[0][0]
         assert sent["notify_category"] == "permission"
 
-    def test_afk_mode_returns_early(self):
-        """In AFK mode, hook returns without sending (handled by permission-request.py)."""
-        with patch("notify_permission.read_mode", return_value="afk"), \
-             patch("notify_permission.send_to_daemon") as mock_send:
-            main()
-
-        mock_send.assert_not_called()
-
     def test_non_permission_notification_ignored(self, tmp_path):
         """Non-permission_prompt notifications are ignored."""
         hook_input = _make_hook_input(notification_type="other_type")
 
-        with patch("notify_permission.read_mode", return_value="notify"), \
-             patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
+        with patch("notify_permission.SILENT_FLAG", str(tmp_path / ".silent_nonexistent")), \
              patch("notify_permission.ASK_USER_FLAG", str(tmp_path / ".flag_nonexistent")), \
              patch("json.load", return_value=hook_input), \
              patch("notify_permission.send_to_daemon") as mock_send:

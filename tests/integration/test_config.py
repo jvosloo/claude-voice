@@ -30,10 +30,6 @@ class TestLoadConfigWithFiles:
             },
             "audio": {"sample_rate": 44100},
             "overlay": {"enabled": False, "style": "frosted"},
-            "afk": {
-                "telegram": {"bot_token": "tok", "chat_id": "123"},
-                "hotkey": "left_alt+a",
-            },
         }
         config_path = tmp_path / "config.yaml"
         config_path.write_text(yaml.dump(config_data))
@@ -48,7 +44,6 @@ class TestLoadConfigWithFiles:
         assert cfg.speech.speed == 1.2
         assert cfg.audio.sample_rate == 44100
         assert cfg.overlay.style == "frosted"
-        assert cfg.afk.telegram.bot_token == "tok"
 
     def test_empty_file(self, tmp_path):
         config_path = tmp_path / "config.yaml"

@@ -11,7 +11,7 @@ sys.modules.setdefault('pynput.keyboard', MagicMock())
 
 from daemon.config import (
     Config, InputConfig, TranscriptionConfig, SpeechConfig,
-    AudioConfig, OverlayConfig, AfkConfig, AfkTelegramConfig,
+    AudioConfig, OverlayConfig,
 )
 from daemon.main import VoiceDaemon
 
@@ -24,7 +24,6 @@ def _default_config(**overrides) -> Config:
         "speech": SpeechConfig(),
         "audio": AudioConfig(),
         "overlay": OverlayConfig(enabled=False),
-        "afk": AfkConfig(),
     }
     for key, val in overrides.items():
         sections[key] = val
@@ -49,9 +48,6 @@ def _make_daemon(config=None) -> VoiceDaemon:
     d.transcriber._model = "loaded_model"
     d.hotkey_listener = MagicMock()
     d.tts_engine = MagicMock()
-    d.afk = MagicMock()
-    d.afk.active = False
-    d.afk.is_configured = False
     d._languages = [d.config.transcription.language]
     if d.config.transcription.extra_languages:
         d._languages += d.config.transcription.extra_languages
@@ -179,17 +175,6 @@ class TestReloadHotkey:
         assert d._languages == ["en", "af", "de"]
         MockHL.assert_called_once()
 
-    def test_afk_hotkey_change_rebuilds_listener(self):
-        d = _make_daemon()
-        new_cfg = _default_config(afk=AfkConfig(hotkey="left_alt+b"))
-
-        with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.main.HotkeyListener") as MockHL:
-            MockHL.return_value = MagicMock()
-            d.reload_config()
-
-        MockHL.assert_called_once()
-
     def test_unchanged_hotkey_not_rebuilt(self):
         cfg = _default_config()
         d = _make_daemon(cfg)
@@ -214,7 +199,7 @@ class TestReloadHotkey:
         assert kwargs[1]["on_press"] == d._on_hotkey_press
         assert kwargs[1]["on_release"] == d._on_hotkey_release
         assert kwargs[1]["on_language_change"] == d._on_language_change
-        assert kwargs[1]["on_combo"] == d._toggle_afk
+        assert kwargs[1]["on_combo"] == d._toggle_voice
 
     def test_speech_hotkey_change_rebuilds_listener(self):
         d = _make_daemon()
@@ -240,8 +225,8 @@ class TestReloadHotkey:
             d.reload_config()
 
         kwargs = MockHL.call_args[1]
-        assert kwargs["combo_hotkey_2"] == "right_alt+v"
-        assert kwargs["on_combo_2"] == d._toggle_voice
+        assert kwargs["combo_hotkey"] == "right_alt+v"
+        assert kwargs["on_combo"] == d._toggle_voice
 
     def test_speech_hotkey_none_does_not_trigger_rebuild(self):
         """When speech.hotkey stays at default, no rebuild needed."""
@@ -410,65 +395,6 @@ class TestReloadOverlay:
             d.reload_config()
 
         mock_update.assert_not_called()
-
-
-class TestReloadAfk:
-
-    def test_telegram_credentials_change_rebuilds_afk(self):
-        old_cfg = _default_config(
-            afk=AfkConfig(telegram=AfkTelegramConfig(bot_token="old", chat_id="123")),
-        )
-        d = _make_daemon(old_cfg)
-        old_afk = d.afk
-        new_cfg = _default_config(
-            afk=AfkConfig(telegram=AfkTelegramConfig(bot_token="new", chat_id="123")),
-        )
-
-        with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.main.AfkManager") as MockAM:
-            new_afk = MagicMock()
-            new_afk.is_configured = True
-            new_afk.start_listening.return_value = (True, "")
-            MockAM.return_value = new_afk
-            d.reload_config()
-
-        old_afk.stop_listening.assert_called_once()
-        MockAM.assert_called_once_with(new_cfg)
-        new_afk.start_listening.assert_called_once()
-        assert d.afk is new_afk
-
-    def test_afk_preserves_active_state(self):
-        old_cfg = _default_config(
-            afk=AfkConfig(telegram=AfkTelegramConfig(bot_token="old", chat_id="123")),
-        )
-        d = _make_daemon(old_cfg)
-        d.afk.active = True
-        new_cfg = _default_config(
-            afk=AfkConfig(telegram=AfkTelegramConfig(bot_token="new", chat_id="123")),
-        )
-
-        with patch("daemon.main.load_config", return_value=new_cfg), \
-             patch("daemon.main.AfkManager") as MockAM:
-            new_afk = MagicMock()
-            new_afk.is_configured = True
-            new_afk.start_listening.return_value = (True, "")
-            MockAM.return_value = new_afk
-            d.reload_config()
-
-        new_afk.activate.assert_called_once()
-
-    def test_unchanged_afk_not_rebuilt(self):
-        cfg = _default_config(
-            afk=AfkConfig(telegram=AfkTelegramConfig(bot_token="tok", chat_id="123")),
-        )
-        d = _make_daemon(cfg)
-        old_afk = d.afk
-
-        with patch("daemon.main.load_config", return_value=deepcopy(cfg)):
-            d.reload_config()
-
-        old_afk.stop_listening.assert_not_called()
-        assert d.afk is old_afk
 
 
 class TestReloadConfigStoresNew:
