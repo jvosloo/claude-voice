@@ -15,7 +15,7 @@ Commands (client → daemon):
 
 Status response fields:
     daemon      bool    always True
-    mode        str     "notify", "narrate", or "afk"
+    mode        str     "notify" or "narrate"
     voice       bool    True if voice output enabled
     recording   bool    True if currently recording
     ready       bool    True when fully initialized (models loaded, hotkey active)
