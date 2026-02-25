@@ -4,8 +4,7 @@
 """Claude Code Notification hook for permission prompts.
 
 Plays the "permission needed" audio cue when Claude Code shows a
-permission dialog. Only fires in non-AFK mode — AFK permissions are
-handled programmatically by permission-request.py (PermissionRequest hook).
+permission dialog.
 """
 
 import json
@@ -16,7 +15,7 @@ import time
 # Allow importing _common from the same directory
 sys.path.insert(0, os.path.dirname(__file__))
 from _common import (
-    send_to_daemon, make_debug_logger, read_mode,
+    send_to_daemon, make_debug_logger,
     SILENT_FLAG, ASK_USER_FLAG, get_session,
 )
 
@@ -24,15 +23,6 @@ debug = make_debug_logger(os.path.expanduser("/tmp/claude-voice/logs/permission_
 
 
 def main():
-    mode = read_mode()
-
-    if mode not in ("notify", "afk"):
-        return
-
-    # AFK mode is handled by permission-request.py (PermissionRequest hook)
-    if mode == "afk":
-        return
-
     if os.path.exists(SILENT_FLAG):
         return
 
@@ -56,7 +46,7 @@ def main():
 
     session = get_session(hook_input)
     message = hook_input.get("message", "Permission needed")
-    debug(f"Hook fired: session={session}, mode={mode}")
+    debug(f"Hook fired: session={session}")
 
     # Send notification to daemon (plays "permission needed" phrase)
     send_to_daemon({
