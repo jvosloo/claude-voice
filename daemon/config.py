@@ -70,35 +70,12 @@ class OverlayConfig:
     style: str = "dark"  # "dark", "frosted", or "colored"
 
 @dataclass
-class AfkTelegramConfig:
-    bot_token: str = ""
-    chat_id: str = ""
-
-@dataclass
-class AfkConfig:
-    telegram: AfkTelegramConfig = None
-    hotkey: str = "left_alt+a"
-    voice_commands_activate: list = None
-    voice_commands_deactivate: list = None
-
-    def __post_init__(self):
-        if self.telegram is None:
-            self.telegram = AfkTelegramConfig()
-        elif isinstance(self.telegram, dict):
-            self.telegram = AfkTelegramConfig(**self.telegram)
-        if self.voice_commands_activate is None:
-            self.voice_commands_activate = ["going afk", "away from keyboard"]
-        if self.voice_commands_deactivate is None:
-            self.voice_commands_deactivate = ["back at keyboard", "i'm back"]
-
-@dataclass
 class Config:
     input: InputConfig
     transcription: TranscriptionConfig
     speech: SpeechConfig
     audio: AudioConfig
     overlay: OverlayConfig
-    afk: AfkConfig
 
 def load_config() -> Config:
     """Load configuration from YAML file, with defaults for missing values."""
@@ -122,5 +99,4 @@ def load_config() -> Config:
         speech=SpeechConfig(**speech_data),
         audio=AudioConfig(**data.get('audio', {})),
         overlay=OverlayConfig(**data.get('overlay', {})),
-        afk=AfkConfig(**data.get('afk', {})),
     )

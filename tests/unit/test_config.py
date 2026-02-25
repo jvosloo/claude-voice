@@ -1,43 +1,11 @@
 """Tests for configuration loading in daemon/config.py."""
 
 from daemon.config import (
-    AfkConfig, AfkTelegramConfig, Config, InputConfig, TranscriptionConfig,
+    Config, InputConfig, TranscriptionConfig,
     SpeechConfig, AudioConfig, OverlayConfig, load_config,
     DEFAULT_NOTIFY_PHRASES,
 )
 from unittest.mock import patch, mock_open
-
-
-class TestAfkConfigPostInit:
-
-    def test_none_telegram_gets_default(self):
-        cfg = AfkConfig()
-        assert isinstance(cfg.telegram, AfkTelegramConfig)
-        assert cfg.telegram.bot_token == ""
-
-    def test_dict_telegram_converted(self):
-        cfg = AfkConfig(telegram={"bot_token": "abc", "chat_id": "123"})
-        assert isinstance(cfg.telegram, AfkTelegramConfig)
-        assert cfg.telegram.bot_token == "abc"
-        assert cfg.telegram.chat_id == "123"
-
-    def test_already_instantiated_telegram(self):
-        t = AfkTelegramConfig(bot_token="tok", chat_id="id")
-        cfg = AfkConfig(telegram=t)
-        assert cfg.telegram is t
-
-    def test_default_voice_commands(self):
-        cfg = AfkConfig()
-        assert "going afk" in cfg.voice_commands_activate
-        assert "i'm back" in cfg.voice_commands_deactivate
-
-    def test_custom_voice_commands(self):
-        cfg = AfkConfig(
-            voice_commands_activate=["bye"],
-            voice_commands_deactivate=["hello"],
-        )
-        assert cfg.voice_commands_activate == ["bye"]
-        assert cfg.voice_commands_deactivate == ["hello"]
 
 
 class TestLoadConfig:
