@@ -38,10 +38,8 @@ from daemon.hotkey import HotkeyListener
 from daemon.summarize import ResponseSummarizer
 from daemon.tts import create_tts_engine
 from daemon.notify import classify, play_phrase, stop_playback as stop_notify_playback
-from daemon.afk import AfkManager
 
 SILENT_FLAG = os.path.expanduser("~/.claude-voice/.silent")
-MODE_FILE = os.path.expanduser("~/.claude-voice/.mode")
 TTS_SOCK_PATH = os.path.expanduser("~/.claude-voice/.tts.sock")
 ASK_USER_FLAG = os.path.expanduser("/tmp/claude-voice/.ask_user_active")
 
@@ -58,22 +56,7 @@ _cue_lock = threading.Lock()
 
 
 def _read_mode(config=None) -> str:
-    """Read the current TTS mode.
-
-    AFK mode is stored in the mode file (temporary runtime state).
-    All other modes come from config.yaml (user preference).
-    """
-    # Check for AFK override first
-    if os.path.exists(MODE_FILE):
-        try:
-            with open(MODE_FILE) as f:
-                mode = f.read().strip()
-            if mode == "afk":
-                return "afk"
-        except OSError:
-            pass
-
-    # Otherwise read from config
+    """Read the current TTS mode from config."""
     if config:
         return config.speech.mode
 
@@ -86,21 +69,6 @@ def _read_mode(config=None) -> str:
         return data.get("speech", {}).get("mode", "notify")
     except (OSError, ImportError):
         return "notify"
-
-
-def _set_afk_mode() -> None:
-    """Set AFK mode (writes to mode file)."""
-    with open(MODE_FILE, "w") as f:
-        f.write("afk")
-
-
-def _clear_afk_mode() -> None:
-    """Clear AFK mode (removes mode file)."""
-    if os.path.exists(MODE_FILE):
-        try:
-            os.remove(MODE_FILE)
-        except OSError:
-            pass
 
 
 def _play_cue(frequencies: list[int], duration: float = 0.05, sample_rate: int = 44100) -> None:
@@ -166,10 +134,8 @@ class VoiceDaemon:
             language_hotkey=self.config.input.language_hotkey,
             languages=self._languages,
             on_language_change=self._on_language_change,
-            combo_hotkey=self.config.afk.hotkey,
-            on_combo=self._toggle_afk,
-            combo_hotkey_2=self.config.speech.hotkey,
-            on_combo_2=self._toggle_voice,
+            combo_hotkey=self.config.speech.hotkey,
+            on_combo=self._toggle_voice,
         )
 
         self.tts_engine = create_tts_engine(
@@ -181,7 +147,6 @@ class VoiceDaemon:
         self._shutting_down = False
         self._interrupted_tts = False
         self._ready = False  # Set True when fully initialized
-        self.afk = AfkManager(self.config)
 
         # Response summarizer for narrate mode
         self.summarizer = ResponseSummarizer(
@@ -195,13 +160,8 @@ class VoiceDaemon:
         return _read_mode(self.config)
 
     def set_mode(self, mode: str) -> None:
-        """Set mode. Only used for AFK; other modes come from config.yaml."""
-        if mode == "afk":
-            _set_afk_mode()
-        else:
-            # For notify/narrate, reload config to pick up changes from config.yaml
-            _clear_afk_mode()  # Exit AFK if active
-            self.reload_config()
+        """Set mode by reloading config."""
+        self.reload_config()
 
     def get_voice_enabled(self) -> bool:
         return not os.path.exists(SILENT_FLAG)
@@ -238,7 +198,7 @@ class VoiceDaemon:
             self.recorder.device = new.audio.input_device
             changed.append("audio(device)")
 
-        # HotkeyListener: rebuild if hotkey, language hotkey, languages, or AFK hotkey changed
+        # HotkeyListener: rebuild if hotkey, language hotkey, or languages changed
         new_languages = [new.transcription.language]
         if new.transcription.extra_languages:
             new_languages += new.transcription.extra_languages
@@ -246,7 +206,6 @@ class VoiceDaemon:
             new.input.hotkey != old.input.hotkey
             or new.input.language_hotkey != old.input.language_hotkey
             or new_languages != self._languages
-            or new.afk.hotkey != old.afk.hotkey
             or new.speech.hotkey != old.speech.hotkey
         )
         if hotkey_changed:
@@ -259,10 +218,8 @@ class VoiceDaemon:
                 language_hotkey=new.input.language_hotkey,
                 languages=self._languages,
                 on_language_change=self._on_language_change,
-                combo_hotkey=new.afk.hotkey,
-                on_combo=self._toggle_afk,
-                combo_hotkey_2=new.speech.hotkey,
-                on_combo_2=self._toggle_voice,
+                combo_hotkey=new.speech.hotkey,
+                on_combo=self._toggle_voice,
             )
             self.hotkey_listener.start()
             changed.append("hotkey_listener")
@@ -349,22 +306,6 @@ class VoiceDaemon:
                 self.tts_engine.set_emitter(self.control_server.emit)
             changed.append("tts_engine")
 
-        # AfkManager: recreate with new config
-        if (new.afk.telegram.bot_token != old.afk.telegram.bot_token
-                or new.afk.telegram.chat_id != old.afk.telegram.chat_id):
-            was_active = self.afk.active
-            self.afk.stop_listening()
-            self.afk = AfkManager(new)
-            if self.afk.is_configured:
-                ok, reason = self.afk.start_listening(on_toggle=self._toggle_afk)
-                if not ok:
-                    print(f"Telegram: failed to connect ({reason})")
-                    from daemon import overlay
-                    overlay.show_flash(f"Telegram: {reason}")
-                elif was_active:
-                    self.afk.activate()
-            changed.append("afk")
-
         self.config = new
         summary = ", ".join(changed) if changed else "no components changed"
         print(f"Config reloaded: {summary}")
@@ -414,53 +355,7 @@ class VoiceDaemon:
             print("Voice output enabled")
             return True
 
-        # AFK mode commands
-        if text_lower in self.config.afk.voice_commands_activate:
-            self._activate_afk()
-            return True
-
-        if text_lower in self.config.afk.voice_commands_deactivate:
-            self._deactivate_afk()
-            return True
-
         return False
-
-    def _activate_afk(self) -> None:
-        """Activate AFK mode with cue and overlay feedback."""
-        from daemon import overlay
-        if not self.afk.is_configured:
-            print("AFK mode: Telegram not configured")
-            return
-        if self.afk.active:
-            print("Already in AFK mode")
-            return
-        _set_afk_mode()
-        if self.afk.activate():
-            _play_cue(CUE_ASCENDING)
-            overlay.show_flash("AFK")
-            print("AFK mode activated")
-        else:
-            _clear_afk_mode()
-            print("AFK mode: Telegram not connected")
-
-    def _deactivate_afk(self) -> None:
-        """Deactivate AFK mode, restore previous voice mode, with feedback."""
-        from daemon import overlay
-        if not self.afk.active:
-            return
-        self.afk.deactivate()
-        _clear_afk_mode()
-        _play_cue(CUE_DESCENDING)
-        overlay.show_flash("AFK OFF")
-        restored_mode = self.config.speech.mode
-        print(f"AFK mode deactivated, restored {restored_mode} mode")
-
-    def _toggle_afk(self) -> None:
-        """Toggle AFK mode on/off."""
-        if self.afk.active:
-            self._deactivate_afk()
-        else:
-            self._activate_afk()
 
     def _toggle_voice(self) -> None:
         """Toggle voice output on/off via speech hotkey."""
@@ -511,21 +406,6 @@ class VoiceDaemon:
 
                 request = json.loads(data.decode())
 
-                # Check if this is an AFK-eligible request
-                session = request.get("session")
-
-                if self.afk.active and session:
-                    # Route through AFK manager
-                    response = self.afk.handle_hook_request(request)
-                    # Send response back to hook
-                    conn.sendall(json.dumps(response).encode())
-                    conn.close()
-                    conn_closed = True
-                    continue
-
-                # Not AFK - send non-waiting response and handle normally
-                if session:
-                    conn.sendall(json.dumps({"wait": False}).encode())
                 conn.close()
                 conn_closed = True
 
@@ -559,9 +439,6 @@ class VoiceDaemon:
                             # Summarization failed, fall back to notify
                             print("Narrate: summarization failed, using notify fallback")
                             play_phrase("done", self.config.speech.notify_phrases)
-                    else:
-                        # AFK or other modes: speak verbatim
-                        self.tts_engine.speak(text, voice=voice, speed=speed, lang_code=lang_code)
             except Exception as e:
                 print(f"TTS server error: {e}")
             finally:
@@ -631,9 +508,6 @@ class VoiceDaemon:
         """Clean shutdown of the daemon."""
         global _cue_stream
         print("\nShutting down...")
-        if self.afk.active:
-            self.afk.deactivate()
-        self.afk.stop_listening()
         self._shutting_down = True
 
         # Close audio cue stream
@@ -701,9 +575,6 @@ class VoiceDaemon:
         print("Press Ctrl+C to stop")
         print("=" * 50)
 
-        # Clear any stale AFK mode from a previous session (AFK never persists)
-        _clear_afk_mode()
-
         # Clean stale ask-user flag from a previous crash
         if os.path.exists(ASK_USER_FLAG):
             try:
@@ -712,10 +583,6 @@ class VoiceDaemon:
                 pass
         print(f"TTS mode: {_read_mode()}")
         print(f"TTS engine: {self.config.speech.engine}")
-        if self.afk.is_configured:
-            print(f"AFK mode: configured (Telegram)")
-        else:
-            print(f"AFK mode: not configured (set telegram bot_token and chat_id)")
 
         # Initialize overlay (creates window, but Cocoa run loop isn't running yet
         # so animations won't play until later)
@@ -803,15 +670,6 @@ class VoiceDaemon:
             # Wire TTS error events to socket subscribers
             if hasattr(self.tts_engine, 'set_emitter'):
                 self.tts_engine.set_emitter(self.control_server.emit)
-
-            # Start Telegram polling (always-on for /afk command)
-            if self.afk.is_configured:
-                ok, reason = self.afk.start_listening(on_toggle=self._toggle_afk)
-                if ok:
-                    print("Telegram: listening for /afk command")
-                else:
-                    print(f"Telegram: failed to connect ({reason})")
-                    overlay.show_flash(f"Telegram: {reason}")
 
             # Start hotkey listener on background thread
             self.hotkey_listener.start()
