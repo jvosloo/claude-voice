@@ -7,8 +7,6 @@ import sys
 # Ensure print output is unbuffered (visible in log files when running in background)
 sys.stdout.reconfigure(line_buffering=True)
 import signal
-import subprocess
-import tempfile
 import threading
 import json
 import numpy as np
@@ -51,7 +49,27 @@ CUE_DESCENDING = [880, 660, 440]
 CUE_REC_START = [440, 880]
 CUE_REC_STOP = [880, 440]
 CUE_FADE = 0.005   # fade in/out per tone (seconds)
-CUE_VOLUME = 0.3   # amplitude multiplier (system volume applies on top via afplay)
+CUE_VOLUME = 0.15  # amplitude multiplier
+
+# Pre-computed audio arrays keyed by frequency tuple — populated by _init_cue_cache()
+_cue_cache: dict[tuple[int, ...], np.ndarray] = {}
+_cue_stream: sd.OutputStream | None = None
+_cue_lock = threading.Lock()
+
+
+def _init_cue_cache(duration: float = 0.05, sample_rate: int = 44100) -> None:
+    """Pre-compute cue audio arrays so _play_cue has zero work at play time."""
+    for freqs in [CUE_ASCENDING, CUE_DESCENDING, CUE_REC_START, CUE_REC_STOP]:
+        samples = []
+        for freq in freqs:
+            t = np.linspace(0, duration, int(sample_rate * duration), False)
+            tone = np.sin(2 * np.pi * freq * t)
+            fade_samples = int(sample_rate * CUE_FADE)
+            tone[:fade_samples] *= np.linspace(0, 1, fade_samples)
+            tone[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+            samples.append(tone)
+        audio = np.concatenate(samples).astype(np.float32) * CUE_VOLUME
+        _cue_cache[tuple(freqs)] = audio.reshape(-1, 1)
 
 
 def _read_mode(config=None) -> str:
@@ -70,32 +88,22 @@ def _read_mode(config=None) -> str:
         return "notify"
 
 
-def _play_cue(frequencies: list[int], duration: float = 0.05, sample_rate: int = 44100) -> None:
-    """Play a short audio cue via afplay so system volume applies."""
-    import soundfile as sf
+def _play_cue(frequencies: list[int]) -> None:
+    """Play a pre-cached audio cue via sounddevice (instant, respects system volume)."""
+    global _cue_stream
+    audio = _cue_cache.get(tuple(frequencies))
+    if audio is None:
+        return
 
     def _play():
-        samples = []
-        for freq in frequencies:
-            t = np.linspace(0, duration, int(sample_rate * duration), False)
-            tone = np.sin(2 * np.pi * freq * t)
-            fade_samples = int(sample_rate * CUE_FADE)
-            tone[:fade_samples] *= np.linspace(0, 1, fade_samples)
-            tone[-fade_samples:] *= np.linspace(1, 0, fade_samples)
-            samples.append(tone)
-
-        audio = np.concatenate(samples).astype(np.float32) * CUE_VOLUME
-
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-            tmp_path = tmp.name
-        try:
-            sf.write(tmp_path, audio, sample_rate)
-            subprocess.run(['afplay', tmp_path], check=False)
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        global _cue_stream
+        with _cue_lock:
+            if _cue_stream is None or not _cue_stream.active:
+                _cue_stream = sd.OutputStream(
+                    samplerate=44100, channels=1, dtype=np.float32,
+                )
+                _cue_stream.start()
+            _cue_stream.write(audio)
 
     threading.Thread(target=_play, daemon=True).start()
 
@@ -468,6 +476,13 @@ class VoiceDaemon:
                 print(f"Too short ({duration:.1f}s), ignoring")
             return
 
+        # Skip silence — prevents Whisper hallucinations on empty audio
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        if rms < 0.003:
+            overlay.hide()
+            print(f"Silent ({rms:.4f} RMS), ignoring")
+            return
+
         overlay.show_transcribing()
         print(f"Transcribing {duration:.1f}s of audio...")
 
@@ -582,6 +597,7 @@ class VoiceDaemon:
                 os.remove(ASK_USER_FLAG)
             except OSError:
                 pass
+        _init_cue_cache()
         print(f"TTS mode: {_read_mode()}")
         print(f"TTS engine: {self.config.speech.engine}")
 
