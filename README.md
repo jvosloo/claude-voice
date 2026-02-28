@@ -221,7 +221,7 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 
 **Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast. `large-v3-turbo` is 6x faster with nearly identical accuracy.
 
-**Note:** The `.en` models (e.g. `base.en`) only support English. To use `extra_languages`, you need a multilingual model like `large-v3-turbo` or `large-v3`.
+**Note:** The `.en` models (e.g. `base.en`) only support English for local transcription. To use `extra_languages`, either use a multilingual model (e.g. `large-v3-turbo`) **or** configure a [cloud backend](#cloud-transcription-backends) for those languages. This lets you run a lightweight `.en` model for English while routing other languages to OpenAI.
 
 ### Word Replacements
 

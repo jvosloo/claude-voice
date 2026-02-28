@@ -586,8 +586,12 @@ class VoiceDaemon:
         if self.config.transcription.extra_languages:
             model = self.config.transcription.model
             if model.endswith(".en"):
-                print(f"WARNING: Model '{model}' only supports English.")
-                print(f"  Extra languages {self.config.transcription.extra_languages} require a multilingual model (e.g. large-v3).")
+                # Only warn about languages that don't have a cloud backend
+                local_only = [lang for lang in self.config.transcription.extra_languages
+                              if lang not in self.config.transcription.language_backends]
+                if local_only:
+                    print(f"WARNING: Model '{model}' only supports English.")
+                    print(f"  Languages {local_only} require a multilingual model (e.g. large-v3) or a cloud backend.")
         print("Press Ctrl+C to stop")
         print("=" * 50)
 

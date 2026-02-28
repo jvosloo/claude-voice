@@ -17,7 +17,9 @@ transcription:
     "clawd": "Claude"             # Key = what Whisper hears, Value = what you actually said
     # "clothes code": "Claude Code"
   # Per-language backend overrides — use a cloud API for specific languages
-  # while keeping free local Whisper for English
+  # while keeping free local Whisper for English.
+  # Tip: With cloud backends, you can use a lightweight .en model (e.g. small.en)
+  # for English and route other languages to OpenAI — saving significant RAM.
   # language_backends:
   #   af:                              # Language code to override
   #     backend: "openai"              # Uses your existing speech.openai_api_key

@@ -73,7 +73,7 @@ Same Whisper `large-v3` model, same MLX backend. The only change is passing a di
 
 - **No `extra_languages` configured**: language hotkey does nothing, behaves exactly as today
 - **No `language_hotkey` configured**: no cycling available, single-language mode as today
-- **Model compatibility**: `.en` models (e.g., `base.en`, `small.en`) only support English. If someone configures extra languages with an English-only model, log a warning at startup suggesting they switch to a multilingual model like `large-v3`
+- **Model compatibility**: `.en` models (e.g., `base.en`, `small.en`) only support English locally. If someone configures extra languages with an English-only model and no cloud backend for those languages, log a warning at startup. Cloud backends (e.g. OpenAI) bypass the local model entirely, so `.en` models work fine with extra languages that have a cloud backend configured
 - **Overlay disabled**: language cycling still works, no visual feedback. Print language changes to daemon console log instead
 
 ## Testing Approach
