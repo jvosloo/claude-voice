@@ -2,6 +2,8 @@
 
 import os
 import re
+import time
+import threading
 import numpy as np
 from typing import Optional
 
@@ -58,7 +60,8 @@ class Transcriber:
     }
 
     def __init__(self, model_name: str = "base.en", device: str = "cpu", backend: str = "faster-whisper",
-                 language_backends: dict = None, openai_api_key: str = ""):
+                 language_backends: dict = None, openai_api_key: str = "",
+                 idle_unload: int = 0):
         self.model_name = model_name
         self.device = device
         self.backend = backend
@@ -67,9 +70,44 @@ class Transcriber:
         self.language_backends = language_backends or {}
         self.openai_api_key = openai_api_key
         self._cloud_transcribers = {}
+        self._last_used = time.time()
+        self._idle_timer: threading.Timer | None = None
+        self._idle_unload = idle_unload
+        self._start_idle_timer()
+
+    def _start_idle_timer(self):
+        """Start the periodic idle-check timer."""
+        self.stop_idle_timer()
+        if self._idle_unload <= 0:
+            return
+        t = threading.Timer(60.0, self._check_idle)
+        t.daemon = True
+        t.start()
+        self._idle_timer = t
+
+    def stop_idle_timer(self):
+        """Cancel the idle-check timer."""
+        if self._idle_timer is not None:
+            self._idle_timer.cancel()
+            self._idle_timer = None
+
+    def set_idle_unload(self, minutes: int):
+        """Update the idle unload timeout and restart the timer."""
+        self._idle_unload = minutes
+        self._start_idle_timer()
+
+    def _check_idle(self):
+        """Timer callback: unload model if idle too long, then reschedule."""
+        if self._idle_unload > 0 and self._model is not None:
+            idle_seconds = time.time() - self._last_used
+            if idle_seconds >= self._idle_unload * 60:
+                print(f"Transcription model idle for {idle_seconds/60:.0f}m, unloading from RAM")
+                self._model = None
+        self._start_idle_timer()
 
     def _ensure_model(self):
         """Lazy-load the Whisper model."""
+        self._last_used = time.time()
         if self._model is None:
             from daemon.spinner import Spinner
             if self.backend == "parakeet":
@@ -106,6 +144,7 @@ class Transcriber:
         Returns:
             Transcribed text string
         """
+        self._last_used = time.time()
         if len(audio) == 0:
             return ""
 

@@ -41,6 +41,7 @@ class HotkeyListener:
         on_combo: Optional[Callable[[], None]] = None,
         combo_hotkey_2: Optional[str] = None,
         on_combo_2: Optional[Callable[[], None]] = None,
+        on_esc_during_recording: Optional[Callable[[], None]] = None,
     ):
         self.hotkey = KEY_MAP.get(hotkey, keyboard.Key.alt_r)
         self.on_press = on_press
@@ -67,6 +68,8 @@ class HotkeyListener:
                 # changing the character (e.g. a -> å) don't break matching
                 self._combo_vk = _MACOS_CHAR_TO_VK.get(parts[1].lower())
 
+        self._on_esc_during_recording = on_esc_during_recording
+
         # Second combo hotkey (e.g. speech toggle)
         self._combo_modifier_2 = None
         self._combo_vk_2 = None
@@ -81,12 +84,19 @@ class HotkeyListener:
     def active_language(self) -> str:
         return self._languages[self._language_index]
 
+    def clear_pressed(self) -> None:
+        """Clear the pressed state so next release is a no-op."""
+        self._pressed = False
+
     def _handle_press(self, key) -> None:
         """Handle key press event."""
         self._pressed_keys.add(key)
         if key == self.hotkey and not self._pressed:
             self._pressed = True
             self.on_press()
+        # ESC during recording
+        if key == keyboard.Key.esc and self._pressed and self._on_esc_during_recording:
+            self._on_esc_during_recording()
         # Combo hotkey detection (match by virtual key code to handle
         # macOS Option key changing characters, e.g. Option+A -> å)
         if (self._combo_modifier and self._on_combo

@@ -75,6 +75,7 @@ if PYOBJC_AVAILABLE:
             self._mode = "idle"  # idle, recording, transcribing, language_flash
             self._phase = 0.0
             self._label = None  # e.g. "AF"
+            self._live_levels = None  # list[float] from mic RMS, or None for sine wave
             return self
 
         def setStyle_(self, style):
@@ -141,7 +142,7 @@ if PYOBJC_AVAILABLE:
 
 
         def _draw_waveform(self, bounds):
-            """Draw animated waveform bars."""
+            """Draw animated waveform bars (live mic levels or sine fallback)."""
             total_w = NUM_BARS * BAR_WIDTH + (NUM_BARS - 1) * BAR_GAP
             start_x = (bounds.size.width - total_w) / 2
             center_y = bounds.size.height / 2
@@ -150,8 +151,15 @@ if PYOBJC_AVAILABLE:
 
             for i in range(NUM_BARS):
                 speed = BAR_SPEEDS[i]
-                wave = math.sin(self._phase * speed * 2 * math.pi)
-                h = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * (wave + 1) / 2
+                wave = (math.sin(self._phase * speed * 2 * math.pi) + 1) / 2  # 0..1
+                if self._live_levels is not None and i < len(self._live_levels):
+                    # Live level modulates the sine amplitude — bars animate
+                    # organically but scale with voice volume
+                    level = self._live_levels[i]
+                    amplitude = max(level, 0.08)
+                    h = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * amplitude * wave
+                else:
+                    h = BAR_MIN_H + (BAR_MAX_H - BAR_MIN_H) * wave
 
                 x = start_x + i * (BAR_WIDTH + BAR_GAP)
                 y = center_y - h / 2
@@ -232,6 +240,7 @@ if PYOBJC_AVAILABLE:
             self._style = "dark"
             self._fade_timer = None
             self._effect_view = None
+            self._recorder = None
             return self
 
         def setup(self):
@@ -385,8 +394,32 @@ if PYOBJC_AVAILABLE:
             self._set_pill_width(PILL_WIDTH)
             self._state = "idle"
             self._pill_view.setLabel_(None)
+            self._pill_view._live_levels = None
             self._pill_view.setMode_("idle")
             self._window.setAlphaValue_(0.0)
+
+        def show_cancel_warning(self):
+            """Show a red 'ESC to cancel' flash. Thread-safe."""
+            if self._window is None:
+                return
+            self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                "doShowCancelWarning", None, False
+            )
+
+        def doShowCancelWarning(self):
+            """Main thread: show red pill with 'ESC to cancel' text."""
+            self._stop_anim()
+            self._cancel_fade()
+            self._state = "language_flash"
+            cancel_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                0xFF / 255.0, 0x3B / 255.0, 0x30 / 255.0, 1.0  # #FF3B30 (red)
+            )
+            self._pill_view.setLabel_("ESC to cancel")
+            self._pill_view.setBackgroundColor_(cancel_color)
+            self._pill_view.setForegroundColor_(NSColor.whiteColor())
+            self._pill_view.setMode_("language_flash")
+            self._resize_pill("ESC to cancel")
+            self._window.setAlphaValue_(1.0)
 
         def show_flash(self, text):
             """Flash the pill with arbitrary text. Thread-safe."""
@@ -488,6 +521,13 @@ if PYOBJC_AVAILABLE:
         def animTick_(self, timer):
             """Timer callback: advance animation phase and redraw."""
             self._anim_phase += ANIM_INTERVAL
+            if self._state == "recording" and self._recorder is not None:
+                try:
+                    self._pill_view._live_levels = self._recorder.get_levels()
+                except Exception:
+                    self._pill_view._live_levels = None
+            else:
+                self._pill_view._live_levels = None
             self._pill_view.setPhase_(self._anim_phase)
 
 
@@ -506,6 +546,12 @@ def init(style: str = "dark"):
     _controller.setup()
 
 
+def set_recorder(recorder):
+    """Set the AudioRecorder reference for live waveform levels."""
+    if _controller:
+        _controller._recorder = recorder
+
+
 def show_recording(label=None):
     if _controller:
         _controller.show_recording(label=label)
@@ -515,6 +561,12 @@ def update_style(style="dark"):
     """Update overlay style. Thread-safe (can be called from any thread)."""
     if _controller:
         _controller.update_style(style)
+
+
+def show_cancel_warning():
+    """Show a red 'ESC to cancel' flash. Thread-safe."""
+    if _controller:
+        _controller.show_cancel_warning()
 
 
 def show_flash(text):

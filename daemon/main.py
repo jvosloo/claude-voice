@@ -124,6 +124,7 @@ class VoiceDaemon:
             backend=self.config.transcription.backend,
             language_backends=self.config.transcription.language_backends,
             openai_api_key=self.config.speech.openai_api_key,
+            idle_unload=self.config.transcription.idle_unload,
         )
 
         self.keyboard = KeyboardSimulator(
@@ -145,6 +146,7 @@ class VoiceDaemon:
             on_language_change=self._on_language_change,
             combo_hotkey=self.config.speech.hotkey,
             on_combo=self._toggle_voice,
+            on_esc_during_recording=self._on_esc_during_recording,
         )
 
         self.tts_engine = create_tts_engine(
@@ -156,6 +158,11 @@ class VoiceDaemon:
         self._shutting_down = False
         self._interrupted_tts = False
         self._ready = False  # Set True when fully initialized
+
+        # Double-ESC cancel state
+        self._cancel_warned = False
+        self._cancel_esc_time = 0.0
+        self._recording_cancelled = False
 
         # Response summarizer for narrate mode
         self.summarizer = ResponseSummarizer(
@@ -229,6 +236,7 @@ class VoiceDaemon:
                 on_language_change=self._on_language_change,
                 combo_hotkey=new.speech.hotkey,
                 on_combo=self._toggle_voice,
+                on_esc_during_recording=self._on_esc_during_recording,
             )
             self.hotkey_listener.start()
             changed.append("hotkey_listener")
@@ -244,6 +252,11 @@ class VoiceDaemon:
         elif new.transcription.device != old.transcription.device:
             self.transcriber.device = new.transcription.device
             changed.append("transcriber(device)")
+
+        # Idle unload timer
+        if new.transcription.idle_unload != old.transcription.idle_unload:
+            self.transcriber.set_idle_unload(new.transcription.idle_unload)
+            changed.append(f"transcriber(idle_unload={new.transcription.idle_unload}m)")
 
         # Update language_backends and openai_api_key (hot-reloadable)
         cloud_changed = (
@@ -327,10 +340,53 @@ class VoiceDaemon:
         from daemon import overlay
         overlay.show_language_flash(code)
 
+    def _on_esc_during_recording(self) -> None:
+        """Called when ESC is pressed during recording. Double-tap to cancel."""
+        import time as _time
+        from daemon import overlay
+
+        now = _time.time()
+        if self._cancel_warned and (now - self._cancel_esc_time) < 2.0:
+            # Second ESC within 2s — cancel the recording
+            self._recording_cancelled = True
+            self._cancel_warned = False
+            self.recorder.stop()
+            self.hotkey_listener.clear_pressed()
+            overlay.hide()
+            _play_cue(CUE_DESCENDING)
+            print("Recording cancelled (ESC)")
+        else:
+            # First ESC — show warning
+            self._cancel_warned = True
+            self._cancel_esc_time = now
+            overlay.show_cancel_warning()
+
+            def _dismiss_warning():
+                _time.sleep(2.0)
+                if self._cancel_warned:
+                    self._cancel_warned = False
+                    if self.recorder.is_recording:
+                        # Still recording — revert to recording overlay
+                        lang = self.hotkey_listener.active_language
+                        default_lang = self._languages[0]
+                        label = lang.upper() if lang != default_lang else None
+                        overlay.show_recording(label=label)
+
+            threading.Thread(target=_dismiss_warning, daemon=True).start()
+
     def _on_hotkey_press(self) -> None:
         """Called when hotkey is pressed - start recording."""
+        # Reset cancel state
+        self._cancel_warned = False
+        self._recording_cancelled = False
         # Start recording FIRST - minimize latency
-        self.recorder.start()
+        try:
+            self.recorder.start()
+        except Exception as e:
+            print(f"Failed to start recording: {e}")
+            from daemon import overlay
+            overlay.show_flash("Mic Error")
+            return
         # Play ascending cue to signal recording started
         _play_cue(CUE_REC_START)
         print("Recording...")
@@ -465,9 +521,21 @@ class VoiceDaemon:
         """Called when hotkey is released - stop, transcribe, type."""
         from daemon import overlay
 
+        # If recording was cancelled via ESC, do nothing
+        if self._recording_cancelled:
+            self._recording_cancelled = False
+            return
+
         audio = self.recorder.stop()
         # Play descending cue to signal recording stopped
         _play_cue(CUE_REC_STOP)
+
+        # Check for device disconnect during recording
+        if self.recorder.had_device_error:
+            overlay.show_flash("Mic Disconnected")
+            print("Recording aborted: audio device error")
+            return
+
         duration = self.recorder.get_duration(audio)
 
         if duration < self.config.input.min_audio_length:
@@ -562,6 +630,7 @@ class VoiceDaemon:
                 pass  # Socket already closed
         if os.path.exists(TTS_SOCK_PATH):
             os.unlink(TTS_SOCK_PATH)
+        self.transcriber.stop_idle_timer()
         self.hotkey_listener.stop()
         self.recorder.shutdown()
 
@@ -623,6 +692,7 @@ class VoiceDaemon:
         if overlay_cfg.enabled:
             from daemon import overlay
             overlay.init(style=overlay_cfg.style)
+            overlay.set_recorder(self.recorder)
 
         # Interactive prompts run on main thread BEFORE Cocoa steals focus
         is_foreground = sys.stdin.isatty()
