@@ -1,6 +1,6 @@
-"""Tests for transcription word replacements."""
+"""Tests for transcription word replacements and filler stripping."""
 
-from daemon.transcribe import apply_word_replacements
+from daemon.transcribe import apply_word_replacements, strip_filler_words
 
 
 class TestApplyWordReplacements:
@@ -46,3 +46,48 @@ class TestApplyWordReplacements:
     def test_preserves_punctuation(self):
         result = apply_word_replacements("I need to taste.", {"taste": "test"})
         assert result == "I need to test."
+
+
+class TestStripFillerWords:
+    """Tests for strip_filler_words function."""
+
+    def test_strips_um(self):
+        assert strip_filler_words("I um need to test this") == "I need to test this"
+
+    def test_strips_uh(self):
+        assert strip_filler_words("uh I need to test this") == "I need to test this"
+
+    def test_strips_ah(self):
+        assert strip_filler_words("ah I need to test this") == "I need to test this"
+
+    def test_strips_you_know(self):
+        assert strip_filler_words("I you know need to test this") == "I need to test this"
+
+    def test_strips_multiple_fillers(self):
+        assert strip_filler_words("um I uh need to test this") == "I need to test this"
+
+    def test_preserves_common_words(self):
+        # Words like "like", "so", "well" are NOT stripped (too context-dependent)
+        assert strip_filler_words("I like this so well") == "I like this so well"
+
+    def test_case_insensitive(self):
+        assert strip_filler_words("Um I need to test") == "I need to test"
+
+    def test_empty_string(self):
+        assert strip_filler_words("") == ""
+
+    def test_no_fillers(self):
+        assert strip_filler_words("I need to test this") == "I need to test this"
+
+    def test_capitalizes_after_leading_filler(self):
+        assert strip_filler_words("uh hello world") == "Hello world"
+
+    def test_strips_filler_with_trailing_comma(self):
+        assert strip_filler_words("um, I think so") == "I think so"
+
+    def test_strips_i_mean(self):
+        assert strip_filler_words("I mean it works fine") == "It works fine"
+
+    def test_only_fillers(self):
+        result = strip_filler_words("um uh er")
+        assert result == ""

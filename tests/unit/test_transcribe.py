@@ -194,3 +194,90 @@ class TestTranscriberBackwardCompat:
         audio = np.zeros(16000, dtype=np.float32)
         result = t.transcribe(audio, language="en")
         assert result == "hello"
+
+
+class TestParakeetBackend:
+    """Verify Parakeet transcription backend routing and behavior."""
+
+    def _make_transcriber(self):
+        t = Transcriber(model_name="mlx-community/parakeet-tdt-0.6b-v3", backend="parakeet")
+        return t
+
+    @patch("parakeet_mlx.from_pretrained")
+    def test_parakeet_transcribes_audio(self, mock_from_pretrained):
+        """Parakeet backend transcribes audio and returns text."""
+        mock_model = MagicMock()
+        mock_result = MagicMock()
+        mock_result.text = "  hello world  "
+        mock_model.transcribe.return_value = mock_result
+        mock_from_pretrained.return_value = mock_model
+
+        t = self._make_transcriber()
+        audio = np.zeros(16000, dtype=np.float32)
+        result = t.transcribe(audio)
+
+        mock_from_pretrained.assert_called_once_with("mlx-community/parakeet-tdt-0.6b-v3")
+        mock_model.transcribe.assert_called_once()
+        assert result == "hello world"
+
+    @patch("parakeet_mlx.from_pretrained")
+    def test_parakeet_model_loaded_once(self, mock_from_pretrained):
+        """Model is lazy-loaded on first call and reused."""
+        mock_model = MagicMock()
+        mock_result = MagicMock()
+        mock_result.text = "hello"
+        mock_model.transcribe.return_value = mock_result
+        mock_from_pretrained.return_value = mock_model
+
+        t = self._make_transcriber()
+        audio = np.zeros(16000, dtype=np.float32)
+        t.transcribe(audio)
+        t.transcribe(audio)
+
+        mock_from_pretrained.assert_called_once()
+        assert mock_model.transcribe.call_count == 2
+
+    @patch("parakeet_mlx.from_pretrained")
+    def test_parakeet_ignores_initial_prompt(self, mock_from_pretrained):
+        """Parakeet does not pass initial_prompt (unsupported)."""
+        mock_model = MagicMock()
+        mock_result = MagicMock()
+        mock_result.text = "hello Claude"
+        mock_model.transcribe.return_value = mock_result
+        mock_from_pretrained.return_value = mock_model
+
+        t = self._make_transcriber()
+        audio = np.zeros(16000, dtype=np.float32)
+        result = t.transcribe(audio, initial_prompt="Claude, pytest")
+
+        call_kwargs = mock_model.transcribe.call_args[1] if mock_model.transcribe.call_args[1] else {}
+        assert "initial_prompt" not in call_kwargs
+        assert result == "hello Claude"
+
+    def test_parakeet_cloud_override_still_works(self):
+        """Per-language cloud override takes priority over parakeet backend."""
+        t = Transcriber(
+            model_name="mlx-community/parakeet-tdt-0.6b-v3",
+            backend="parakeet",
+            language_backends={"af": {"backend": "openai"}},
+            openai_api_key="sk-test",
+        )
+
+        mock_openai = MagicMock()
+        mock_openai.transcribe.return_value = "hallo wêreld"
+        t._cloud_transcribers = {"af": mock_openai}
+
+        audio = np.zeros(16000, dtype=np.float32)
+        result = t.transcribe(audio, language="af")
+
+        mock_openai.transcribe.assert_called_once()
+        assert result == "hallo wêreld"
+
+    @patch("parakeet_mlx.from_pretrained")
+    def test_parakeet_empty_audio_returns_empty(self, mock_from_pretrained):
+        """Empty audio returns empty string without loading model."""
+        t = self._make_transcriber()
+        result = t.transcribe(np.array([], dtype=np.float32))
+
+        mock_from_pretrained.assert_not_called()
+        assert result == ""

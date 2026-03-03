@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.expanduser("~/.claude-voice"))
 from daemon.config import load_config
 from daemon.control import ControlServer
 from daemon.audio import AudioRecorder
-from daemon.transcribe import Transcriber, apply_word_replacements
+from daemon.transcribe import Transcriber, apply_word_replacements, strip_filler_words
 from daemon.keyboard import KeyboardSimulator
 from daemon.hotkey import HotkeyListener
 from daemon.summarize import ResponseSummarizer
@@ -502,11 +502,23 @@ class VoiceDaemon:
             print("No speech detected")
             return
 
+        # Strip filler words (um, uh, etc.)
+        cleaned = strip_filler_words(text)
+        if cleaned != text:
+            print(f"Raw:       {text}")
+            print(f"Cleaned:   {cleaned}")
+            text = cleaned
+
+        if not text:
+            overlay.hide()
+            print("Only filler words detected")
+            return
+
         # Apply word replacements
         if self.config.transcription.word_replacements:
             replaced = apply_word_replacements(text, self.config.transcription.word_replacements)
             if replaced != text:
-                print(f"Whisper:   {text}")
+                print(f"Before:    {text}")
                 print(f"Replaced:  {replaced}")
                 text = replaced
 

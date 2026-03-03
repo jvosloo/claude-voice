@@ -1,9 +1,35 @@
-"""Whisper transcription functionality for Claude Voice daemon."""
+"""Transcription functionality for Claude Voice daemon (Whisper + Parakeet backends)."""
 
 import os
 import re
 import numpy as np
 from typing import Optional
+
+
+FILLER_WORDS = [
+    "you know", "I mean",  # multi-word first (greedy match)
+    "um", "uh", "ah", "er",
+]
+
+# Pre-compiled pattern: match fillers as whole words, case-insensitive
+_FILLER_RE = re.compile(
+    r'\b(?:' + '|'.join(re.escape(f) for f in FILLER_WORDS) + r')\b,?\s*',
+    re.IGNORECASE,
+)
+
+
+def strip_filler_words(text: str) -> str:
+    """Remove filler words (um, uh, like, you know, etc.) from text."""
+    if not text:
+        return text
+    text = _FILLER_RE.sub('', text)
+    # Clean up extra whitespace and fix leading/trailing
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+    # Fix orphaned capitalization: if first char is now lowercase after
+    # stripping a filler from the start, capitalize it
+    if text and text[0].islower():
+        text = text[0].upper() + text[1:]
+    return text
 
 
 def apply_word_replacements(text: str, replacements: dict) -> str:
@@ -46,7 +72,11 @@ class Transcriber:
         """Lazy-load the Whisper model."""
         if self._model is None:
             from daemon.spinner import Spinner
-            if self.backend == "mlx":
+            if self.backend == "parakeet":
+                with Spinner(f"Loading Parakeet model: {self.model_name}"):
+                    from parakeet_mlx import from_pretrained
+                    self._model = from_pretrained(self.model_name)
+            elif self.backend == "mlx":
                 with Spinner(f"Loading MLX Whisper model: {self.model_name}"):
                     # Warm up MLX by doing a dummy transcription (triggers actual model load)
                     silent_audio = np.zeros(16000, dtype=np.float32)  # 1 second of silence
@@ -89,6 +119,9 @@ class Transcriber:
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
 
+        if self.backend == "parakeet":
+            return self._transcribe_parakeet(audio)
+
         if self.backend == "mlx":
             return self._transcribe_mlx(audio, language=language, initial_prompt=initial_prompt)
         else:
@@ -120,6 +153,24 @@ class Transcriber:
         return self._cloud_transcribers[language].transcribe(
             audio, language=language, sample_rate=sample_rate
         )
+
+    def _transcribe_parakeet(self, audio: np.ndarray) -> str:
+        """Transcribe using Parakeet MLX.
+
+        parakeet_mlx.transcribe() expects a file path, so we write
+        a temporary WAV file from the numpy audio buffer.
+        """
+        import tempfile
+        import wave
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as f:
+            with wave.open(f.name, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(16000)
+                wf.writeframes((audio * 32767).astype(np.int16).tobytes())
+            result = self._model.transcribe(f.name)
+        return result.text.strip()
 
     def _transcribe_mlx(self, audio: np.ndarray, language: str = "en",
                         initial_prompt: Optional[str] = None) -> str:
