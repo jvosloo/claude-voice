@@ -18,10 +18,10 @@ class InputConfig:
 
 @dataclass
 class TranscriptionConfig:
-    model: str = "large-v3-turbo"
+    model: str = "mlx-community/parakeet-tdt-0.6b-v2"
     language: str = "en"
     device: str = "cpu"
-    backend: str = "mlx"  # "faster-whisper" or "mlx"
+    backend: str = "parakeet"  # "faster-whisper", "mlx", or "parakeet"
     extra_languages: list = field(default_factory=list)
     word_replacements: dict = field(default_factory=lambda: {"clawd": "Claude"})
     language_backends: dict = field(default_factory=dict)

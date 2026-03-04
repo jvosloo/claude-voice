@@ -209,7 +209,10 @@ class Transcriber:
                 wf.setframerate(16000)
                 wf.writeframes((audio * 32767).astype(np.int16).tobytes())
             result = self._model.transcribe(f.name)
-        return result.text.strip()
+        text = result.text
+        # Parakeet emits <unk> tokens for silence/noise — strip them
+        text = text.replace("<unk>", "")
+        return text.strip()
 
     def _transcribe_mlx(self, audio: np.ndarray, language: str = "en",
                         initial_prompt: Optional[str] = None) -> str:

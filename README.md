@@ -37,7 +37,7 @@ When used with Claude Code, two voice output modes are available:
 
 - **macOS** (Apple Silicon recommended)
 - **Python 3.12+** — install via [pyenv](https://github.com/pyenv/pyenv) (`pyenv install 3.13`) or Homebrew (`brew install python@3.13`)
-- **ffmpeg** — required by mlx-audio; the installer will offer to install it via Homebrew if missing
+- **ffmpeg** — required by mlx-audio and parakeet-mlx; the installer will offer to install it via Homebrew if missing
 
 ---
 
@@ -54,7 +54,7 @@ The installer will:
 - Set up a Python virtual environment with dependencies
 - Install Kokoro TTS (via mlx-audio, Apple Silicon optimized)
 - Install the Claude Code TTS hook
-- Optionally install MLX Whisper (recommended for Apple Silicon)
+- Install Parakeet ASR (default, fastest on Apple Silicon) or MLX Whisper
 - Check and prompt for Microphone and Accessibility permissions
 - Optionally add shell aliases (`cv`, `cvf`, `cvs`)
 
@@ -101,9 +101,10 @@ This removes all installed components. You'll be prompted before deleting your c
 
 ### Voice Input (Works Anywhere)
 
-1. Hold **Right Alt** and speak
+1. Hold **Right Alt** and speak — a waveform overlay animates in response to your voice
 2. Release to transcribe — text is typed into the focused input
-3. Works with any application: browsers, text editors, terminals, etc.
+3. **Double-tap ESC** while recording to cancel (first tap shows warning, second tap discards)
+4. Works with any application: browsers, text editors, terminals, etc.
 
 ### With Claude Code (Two-Way Voice)
 
@@ -200,15 +201,23 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `backend` | `mlx` | `mlx` (fast on Apple Silicon) or `faster-whisper` (CPU) |
-| `model` | `large-v3-turbo` | Whisper model (see table below) |
+| `backend` | `parakeet` | `parakeet` (fastest on Apple Silicon), `mlx` (Whisper), or `faster-whisper` (CPU) |
+| `model` | `mlx-community/parakeet-tdt-0.6b-v2` | Model name (see tables below) |
 | `language` | `en` | Default language code |
 | `extra_languages` | `[]` | Additional languages to cycle through (e.g. `["af", "de"]`) |
 | `device` | `cpu` | Compute device for faster-whisper: `cpu` or `cuda` |
 | `word_replacements` | `{}` | Fix consistently misheard words (see below) |
 | `language_backends` | `{}` | Per-language cloud backend overrides (see below) |
+| `idle_unload` | `5` | Minutes before unloading model from RAM (0 = disabled) |
 
-**Available models:**
+**Parakeet models (recommended):**
+
+| Model | Size | Speed | Notes |
+|-------|------|-------|-------|
+| `mlx-community/parakeet-tdt-0.6b-v2` | ~2GB | Fastest | **Default**, English only, tops HuggingFace ASR leaderboard |
+| `mlx-community/parakeet-tdt-0.6b-v3` | ~2GB | Fast | 25 European languages |
+
+**Whisper models** (for `mlx` or `faster-whisper` backends):
 
 | Model | Size | Speed | Accuracy | Notes |
 |-------|------|-------|----------|-------|
@@ -216,16 +225,16 @@ Edit `~/.claude-voice/config.yaml` to customize behavior.
 | `base.en` | ~150MB | Fast | Good | Balanced |
 | `small.en` | ~500MB | Medium | Better | English only |
 | `medium.en` | ~1.5GB | Slower | Great | English only, high accuracy |
-| `large-v3-turbo` | ~1.6GB | Fast | Near-best | **Default**, multilingual, recommended |
-| `large-v3` | ~3GB | Slowest | Best | Multilingual, highest accuracy |
+| `large-v3-turbo` | ~1.6GB | Fast | Near-best | Multilingual, recommended Whisper model |
+| `large-v3` | ~3GB | Slowest | Best | Multilingual, highest Whisper accuracy |
 
-**Tip:** With MLX backend on Apple Silicon, even `large-v3` runs fast. `large-v3-turbo` is 6x faster with nearly identical accuracy.
+**Note:** English-only models (`.en` suffix for Whisper, `v2` for Parakeet) only support English for local transcription. To use `extra_languages`, either use a multilingual model **or** configure a [cloud backend](#cloud-transcription-backends) for those languages. This lets you run a lightweight English-only model locally while routing other languages to OpenAI.
 
-**Note:** The `.en` models (e.g. `base.en`) only support English for local transcription. To use `extra_languages`, either use a multilingual model (e.g. `large-v3-turbo`) **or** configure a [cloud backend](#cloud-transcription-backends) for those languages. This lets you run a lightweight `.en` model for English while routing other languages to OpenAI.
+Common filler words ("um", "uh", etc.) are automatically stripped from transcriptions.
 
 ### Word Replacements
 
-Fix words that Whisper consistently gets wrong. Replacements are case-insensitive and match whole words only (so "taste" won't match "aftertaste"). Multi-word phrases are supported.
+Fix words that the transcription model consistently gets wrong. Replacements are case-insensitive and match whole words only (so "taste" won't match "aftertaste"). Multi-word phrases are supported.
 
 ```yaml
 transcription:
@@ -238,7 +247,7 @@ Replacements are applied immediately after transcription, before any LLM cleanup
 
 ### Cloud Transcription Backends
 
-Route specific languages to a cloud API while keeping English on free local Whisper. Useful when Whisper doesn't support a language well.
+Route specific languages to a cloud API while keeping English on the free local model. Useful when the local model doesn't support a language well.
 
 ```yaml
 transcription:
@@ -255,7 +264,7 @@ transcription:
 | `openai` | Uses existing `speech.openai_api_key` — no extra setup | $0.006/min (gpt-4o-transcribe) or $0.003/min (mini) |
 | `google` | Requires service account JSON + `pip install google-cloud-speech` | $0.024/min, 60 min/month free tier |
 
-Languages not listed in `language_backends` use the local Whisper model (free). The config hot-reloads without a daemon restart.
+Languages not listed in `language_backends` use the local model (free). The config hot-reloads without a daemon restart.
 
 ### Input Settings
 
@@ -421,5 +430,6 @@ claude-voice/                    # This repo (development)
 - Kokoro TTS model cached at `~/.cache/huggingface/hub/models--mlx-community--Kokoro-82M-bf16/`
 
 ### Models
-- `~/.claude-voice/models/whisper/` - Whisper speech recognition models (auto-downloaded)
+- `~/.claude-voice/models/whisper/` - Whisper speech recognition models (auto-downloaded, if using Whisper backend)
+- Parakeet models cached at `~/.cache/huggingface/` (auto-downloaded on first use, ~2GB)
 - Kokoro TTS model (auto-downloaded via Hugging Face on first use, ~360MB)
