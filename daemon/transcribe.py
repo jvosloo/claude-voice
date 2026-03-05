@@ -212,6 +212,12 @@ class Transcriber:
         text = result.text
         # Parakeet emits <unk> tokens for silence/noise — strip them
         text = text.replace("<unk>", "")
+        # Release MLX Metal computation cache to prevent memory growth
+        try:
+            import mlx.core as mx
+            mx.metal.clear_cache()
+        except Exception:
+            pass
         return text.strip()
 
     def _transcribe_mlx(self, audio: np.ndarray, language: str = "en",
@@ -238,6 +244,11 @@ class Transcriber:
 
         result = mlx_whisper.transcribe(audio, **kwargs)
 
+        try:
+            import mlx.core as mx
+            mx.metal.clear_cache()
+        except Exception:
+            pass
         return result.get("text", "").strip()
 
     def _transcribe_faster_whisper(self, audio: np.ndarray, language: str = "en",

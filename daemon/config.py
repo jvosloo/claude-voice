@@ -14,6 +14,7 @@ class InputConfig:
     auto_submit: bool = False
     min_audio_length: float = 0.5
     typing_delay: float = 0.0
+    smart_insert: bool = True
     debug: bool = False
 
 @dataclass

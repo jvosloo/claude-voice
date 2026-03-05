@@ -32,9 +32,11 @@ Events (daemon → subscribed clients):
 
 import json
 import os
+import select
 import socket
 import stat
 import threading
+import time
 
 CONTROL_SOCK_PATH = os.path.expanduser("~/.claude-voice/.control.sock")
 
@@ -127,6 +129,10 @@ class ControlServer:
                     dead.append(conn)
             for conn in dead:
                 self._event_connections.remove(conn)
+                try:
+                    conn.close()
+                except OSError:
+                    pass
 
     def run(self):
         """Run the control socket server (blocking)."""
@@ -139,11 +145,16 @@ class ControlServer:
         server.listen(5)
         server.settimeout(1.0)
         self._server = server
+        last_prune = time.monotonic()
 
         while not self._shutting_down:
             try:
                 conn, _ = server.accept()
             except socket.timeout:
+                # Prune dead subscriber connections every 30 seconds
+                if time.monotonic() - last_prune >= 30:
+                    self._prune_dead_connections()
+                    last_prune = time.monotonic()
                 continue
             except OSError:
                 break
@@ -155,6 +166,32 @@ class ControlServer:
         server.close()
         if os.path.exists(CONTROL_SOCK_PATH):
             os.unlink(CONTROL_SOCK_PATH)
+
+    def _prune_dead_connections(self):
+        """Remove subscriber connections that have been closed by the client."""
+        with self._lock:
+            if not self._event_connections:
+                return
+            dead = []
+            for conn in self._event_connections:
+                try:
+                    # select() with timeout=0: readable means client sent data or disconnected
+                    ready, _, _ = select.select([conn], [], [], 0)
+                    if ready:
+                        # If readable on a subscribe-only connection, client disconnected
+                        data = conn.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+                        if not data:
+                            dead.append(conn)
+                except (OSError, BlockingIOError):
+                    dead.append(conn)
+            for conn in dead:
+                self._event_connections.remove(conn)
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+            if dead:
+                print(f"Control server: pruned {len(dead)} dead subscriber(s)")
 
     def _handle_connection(self, conn):
         """Handle a single client connection."""

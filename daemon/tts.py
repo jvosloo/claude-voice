@@ -66,6 +66,9 @@ class KokoroTTSEngine:
             import mlx.core as mx
             audio = mx.concatenate(audio_chunks)
             audio_np = np.array(audio, dtype=np.float32)
+            # Release MLX Metal computation cache to prevent memory growth
+            del audio, audio_chunks
+            mx.metal.clear_cache()
 
             # Write to temp WAV file
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:

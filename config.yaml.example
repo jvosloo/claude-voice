@@ -6,6 +6,7 @@ input:
   auto_submit: false           # Press Enter after transcription
   min_audio_length: 0.5        # Ignore recordings shorter than this (seconds)
   typing_delay: 0              # Delay between keystrokes (seconds), e.g. 0.005 for a slight delay
+  smart_insert: true           # Adjust capitalization, spacing, and punctuation based on cursor context
 
 transcription:
   model: "mlx-community/parakeet-tdt-0.6b-v2"  # Parakeet: parakeet-tdt-0.6b-v2 (English), parakeet-tdt-0.6b-v3 (multilingual)

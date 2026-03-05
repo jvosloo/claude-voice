@@ -595,9 +595,17 @@ class VoiceDaemon:
             overlay.hide()
             return
 
+        # Context-aware insertion: adjust spacing/capitalization based on cursor surroundings
+        from daemon.context import get_insertion_context, adjust_text_for_context
+        if self.config.input.smart_insert:
+            ctx = get_insertion_context()
+            text = adjust_text_for_context(text, ctx)
+        else:
+            text = text + " "
+
         print(f"Typing:  {text}")
         print()
-        self.keyboard.type_text(text + " ")
+        self.keyboard.type_text(text)
         overlay.hide()
 
     def _shutdown(self) -> None:

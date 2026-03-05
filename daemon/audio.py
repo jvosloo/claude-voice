@@ -129,6 +129,7 @@ class AudioRecorder:
                 result = audio.flatten()
             else:
                 result = np.array([], dtype=np.float32)
+            self._audio_chunks = []
 
         # Close stream so macOS mic indicator turns off
         if self._stream is not None:
